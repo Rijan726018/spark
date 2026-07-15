@@ -1,0 +1,77 @@
+{
+  "name": "nexus-algo-terminal",
+  "version": "3.0.0",
+  "description": "Nexus AI Algo Terminal — Desktop Edition",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently --kill-others \"cd frontend && npm run dev\" \"wait-on http://localhost:3000 && electron . --dev\"",
+    "dev:electron": "electron . --dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build-frontend": "cd frontend && npm run build",
+    "build": "npm run build-frontend && electron-builder",
+    "pack": "npm run build-frontend && electron-builder --dir",
+    "install-all": "npm install && cd frontend && npm install"
+  },
+  "dependencies": {
+    "lightweight-charts": "^5.1.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.nexus.algoterminal",
+    "productName": "Nexus Algo Terminal",
+    "copyright": "Copyright © 2025 Nexus AI",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "server/**/*",
+      "engines/**/*",
+      "algos/**/*",
+      "generated_algos/**/*",
+      "algo_configs.py",
+      "results/**/*",
+      "ninjatrader_exports/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".venv312",
+        "to": ".venv312",
+        "filter": [
+          "Scripts/**/*",
+          "Lib/**/*"
+        ]
+      }
+    ]
+  }
+}

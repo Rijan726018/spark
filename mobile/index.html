@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1"/>
+<meta name="theme-color" content="#080c18"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<link rel="manifest" href="/manifest.webmanifest"/>
+<title>Spark — Daily Content Ideas</title>
+<style>
+/* ── design tokens ─────────────────────────────────────────── */
+:root{
+  --bg:#080c18; --bg2:#0d1120; --bg3:#111827;
+  --card:#131a2e; --card2:#192036; --card3:#1e2740;
+  --line:#1e2d4a; --line2:#253354;
+  --txt:#e8eeff; --sub:#8ca0cc; --mut:#5a6f96;
+  --acc:#667eea; --acc2:#9b59ff; --acc3:#6ee7b7;
+  --good:#34d399; --warn:#fbbf24; --err:#f87171;
+  --grad:linear-gradient(135deg,#667eea,#9b59ff);
+  --grad2:linear-gradient(135deg,#667eea 0%,#a855f7 50%,#ec4899 100%);
+  --yt:#ff4444;
+  --r:18px; --r2:12px; --r3:8px;
+  --shadow:0 8px 32px rgba(0,0,0,.45);
+  --shadow2:0 2px 12px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html{background:var(--bg)}
+body{
+  min-height:100dvh;color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(ellipse 1400px 500px at 100% -5%,rgba(155,89,255,.14),transparent 60%),
+    radial-gradient(ellipse 1000px 600px at -5% 10%,rgba(102,126,234,.13),transparent 55%),
+    radial-gradient(ellipse 800px 400px at 50% 80%,rgba(52,211,153,.05),transparent 60%),
+    var(--bg);
+}
+
+/* ── layout ─────────────────────────────────────────────────── */
+.app{max-width:520px;margin:0 auto;padding:0 0 100px}
+.scroll{padding:0 16px;padding-top:max(16px,env(safe-area-inset-top))}
+
+/* ── header ─────────────────────────────────────────────────── */
+.hdr{display:flex;align-items:center;gap:10px;padding:14px 0 10px}
+.logo{
+  width:38px;height:38px;border-radius:11px;background:var(--grad);flex:0 0 auto;
+  display:grid;place-items:center;font-size:20px;
+  box-shadow:0 6px 20px rgba(102,126,234,.45)
+}
+.brand-text h1{font-size:19px;font-weight:800;letter-spacing:-.4px;line-height:1}
+.brand-text .sub{color:var(--sub);font-size:11.5px;margin-top:3px;letter-spacing:.1px}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.live-badge{
+  display:flex;align-items:center;gap:5px;background:rgba(52,211,153,.1);
+  border:1px solid rgba(52,211,153,.25);border-radius:999px;padding:4px 9px;
+  font-size:10.5px;font-weight:700;color:#6ee7b7;letter-spacing:.5px
+}
+.live-dot{width:6px;height:6px;border-radius:50%;background:#34d399;animation:pulse 1.8s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+.gear-btn{
+  width:34px;height:34px;border-radius:999px;border:1px solid var(--line2);
+  background:var(--card2);display:grid;place-items:center;font-size:15px;cursor:pointer
+}
+
+/* ── niche chips ─────────────────────────────────────────────── */
+.niches{display:flex;gap:8px;overflow-x:auto;padding:4px 0 14px;scrollbar-width:none}
+.niches::-webkit-scrollbar{display:none}
+.chip{
+  flex:0 0 auto;display:flex;align-items:center;gap:6px;
+  padding:8px 14px;border-radius:999px;border:1px solid var(--line);
+  background:var(--card);color:var(--sub);font-size:13px;font-weight:600;
+  cursor:pointer;transition:.18s all;white-space:nowrap;text-transform:capitalize
+}
+.chip .icon{font-size:14px}
+.chip.active{
+  color:#fff;background:var(--grad);border-color:transparent;
+  box-shadow:0 5px 18px rgba(102,126,234,.4)
+}
+.chip:active{transform:scale(.96)}
+
+/* ── generate button ─────────────────────────────────────────── */
+.gen-wrap{padding:2px 0 8px}
+.cta{
+  width:100%;border:0;border-radius:var(--r);padding:17px 20px;
+  color:#fff;font-size:15.5px;font-weight:800;letter-spacing:.1px;
+  background:var(--grad);cursor:pointer;
+  box-shadow:0 10px 30px rgba(102,126,234,.4);transition:.15s all
+}
+.cta:active{transform:scale(.99) translateY(1px)}
+.cta:disabled{opacity:.65;pointer-events:none}
+.spinner{
+  display:inline-block;width:14px;height:14px;
+  border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:8px
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── stats bar ───────────────────────────────────────────────── */
+.stats-bar{
+  display:flex;gap:8px;padding:10px 0 4px;opacity:0;transition:.3s;
+  pointer-events:none
+}
+.stats-bar.vis{opacity:1;pointer-events:auto}
+.stat-pill{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r2);
+  padding:10px 8px
+}
+.stat-pill .sv{font-size:18px;font-weight:800;letter-spacing:-.5px}
+.stat-pill .sl{font-size:9.5px;color:var(--sub);text-transform:uppercase;letter-spacing:.5px}
+
+/* ── warn bar ────────────────────────────────────────────────── */
+.warnbar{
+  background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);
+  color:#fde68a;font-size:12px;padding:10px 13px;border-radius:var(--r2);
+  margin:8px 0;line-height:1.5
+}
+
+/* ── tabs ────────────────────────────────────────────────────── */
+.tabs{display:flex;gap:3px;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r2);padding:3px;margin:14px 0 0}
+.tab{
+  flex:1;padding:9px 8px;border-radius:9px;border:0;background:transparent;
+  color:var(--sub);font-size:13px;font-weight:700;cursor:pointer;transition:.18s;
+  display:flex;align-items:center;justify-content:center;gap:6px
+}
+.tab.active{background:var(--card3);color:var(--txt);box-shadow:var(--shadow2)}
+.tab .badge{
+  background:var(--acc);color:#fff;font-size:9px;font-weight:800;
+  padding:2px 5px;border-radius:999px;min-width:18px;text-align:center
+}
+.tab.active .badge{background:var(--grad)}
+.tab-panel{display:none;padding-top:14px}
+.tab-panel.active{display:block}
+
+/* ── idea cards ──────────────────────────────────────────────── */
+.cards{display:flex;flex-direction:column;gap:14px}
+.card{
+  background:linear-gradient(160deg,var(--card) 0%,var(--card2) 100%);
+  border:1px solid var(--line);border-radius:var(--r);padding:16px;
+  box-shadow:var(--shadow);position:relative;overflow:hidden;
+  animation:rise .32s both
+}
+.card::before{
+  content:"";position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--grad)
+}
+.card.trend::before{background:linear-gradient(90deg,var(--warn),#f59e0b)}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+.ctop{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ring{position:relative;width:48px;height:48px;flex:0 0 auto}
+.ring svg{transform:rotate(-90deg)}
+.ring .rv{position:absolute;inset:0;display:grid;place-items:center;font-size:12.5px;font-weight:900}
+.pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pill{
+  font-size:10px;font-weight:700;padding:4px 9px;border-radius:999px;
+  text-transform:uppercase;letter-spacing:.4px;white-space:nowrap
+}
+.pill.short{background:rgba(52,211,153,.14);color:#6ee7b7;border:1px solid rgba(52,211,153,.2)}
+.pill.long{background:rgba(102,126,234,.14);color:#aebdff;border:1px solid rgba(102,126,234,.2)}
+.pill.yt{background:rgba(255,68,68,.12);color:#fca5a5;border:1px solid rgba(255,68,68,.2);font-size:9.5px}
+.pill.trend{background:rgba(251,191,36,.12);color:#fde68a;border:1px solid rgba(251,191,36,.2);font-size:9.5px}
+
+.card-title{font-size:16.5px;font-weight:800;line-height:1.3;margin:12px 0 6px;letter-spacing:-.25px}
+.evidence{
+  display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub);
+  background:var(--bg2);border:1px solid var(--line);border-radius:var(--r3);
+  padding:7px 10px;margin-bottom:12px;flex-wrap:wrap
+}
+.evidence .ev-icon{font-size:14px}
+.evidence .ev-stat{font-weight:700;color:var(--txt)}
+.evidence a{color:var(--acc);text-decoration:none;font-size:11px;margin-left:auto;white-space:nowrap}
+.evidence a:hover{text-decoration:underline}
+
+.hook-box{
+  background:var(--card3);border:1px solid var(--line2);border-radius:var(--r2);
+  padding:11px 13px;font-size:13px;line-height:1.55;color:var(--txt)
+}
+.hook-box .hl{color:var(--acc);font-weight:700;font-size:11px;
+  text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px}
+
+details{margin-top:12px}
+summary{
+  list-style:none;cursor:pointer;color:var(--acc);font-size:12.5px;font-weight:700;
+  padding:8px 11px;border-radius:var(--r3);background:var(--bg2);
+  border:1px solid var(--line);display:flex;align-items:center;gap:7px;
+  user-select:none;transition:.15s background
+}
+summary::-webkit-details-marker{display:none}
+summary:hover{background:var(--card)}
+summary .arr{transition:.2s;font-size:10px}
+details[open] summary .arr{transform:rotate(90deg)}
+.det-body{padding:12px 2px 4px}
+.det-h{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 7px}
+ul.titles{list-style:none;display:flex;flex-direction:column;gap:7px}
+ul.titles li{
+  background:var(--bg2);border:1px solid var(--line);border-radius:var(--r2);
+  padding:9px 11px;font-size:13px;display:flex;justify-content:space-between;
+  gap:8px;align-items:flex-start
+}
+ul.titles li span{flex:1;line-height:1.4}
+.copy-btn{
+  flex:0 0 auto;border:1px solid var(--line2);background:var(--card3);
+  color:var(--sub);font-size:10.5px;padding:4px 9px;border-radius:6px;
+  font-weight:700;cursor:pointer;white-space:nowrap;transition:.15s
+}
+.copy-btn:active{color:#fff;background:var(--acc);border-color:transparent}
+
+ol.outline{list-style:none;counter-reset:out;display:flex;flex-direction:column;gap:7px}
+ol.outline li{
+  counter-increment:out;background:var(--bg2);border:1px solid var(--line);
+  border-radius:var(--r2);padding:8px 11px 8px 36px;font-size:12.5px;
+  color:var(--sub);line-height:1.45;position:relative
+}
+ol.outline li::before{
+  content:counter(out);position:absolute;left:11px;top:50%;transform:translateY(-50%);
+  width:16px;height:16px;border-radius:50%;background:var(--line2);
+  display:grid;place-items:center;font-size:10px;font-weight:800;color:var(--acc)
+}
+
+/* ── signals tab ─────────────────────────────────────────────── */
+.sig-list{display:flex;flex-direction:column;gap:10px}
+.sig-card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r2);
+  padding:12px;display:flex;gap:12px;align-items:flex-start
+}
+.sig-rank{
+  flex:0 0 auto;width:28px;height:28px;border-radius:999px;
+  background:var(--card3);border:1px solid var(--line2);
+  display:grid;place-items:center;font-size:11px;font-weight:900;color:var(--sub)
+}
+.sig-body{flex:1;min-width:0}
+.sig-query{font-size:13.5px;font-weight:800;margin-bottom:4px;text-transform:capitalize}
+.sig-ev{font-size:11.5px;color:var(--sub);margin-bottom:6px;line-height:1.4}
+.vel-bar-wrap{height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.vel-bar{height:100%;border-radius:2px;background:var(--grad);transition:.5s width}
+.sig-footer{display:flex;align-items:center;justify-content:space-between;margin-top:7px}
+.sig-source{font-size:10px;color:var(--mut);display:flex;align-items:center;gap:4px}
+.sig-link{color:var(--acc);font-size:10.5px;text-decoration:none}
+.sig-link:hover{text-decoration:underline}
+
+/* ── empty / loading ─────────────────────────────────────────── */
+.empty{text-align:center;color:var(--sub);padding:52px 16px}
+.empty .icon{font-size:44px;margin-bottom:12px}
+.empty p{font-size:14px;line-height:1.6;max-width:280px;margin:0 auto}
+
+.skel{
+  height:160px;border-radius:var(--r);
+  background:linear-gradient(100deg,var(--card) 30%,var(--card2) 50%,var(--card) 70%);
+  background-size:200% 100%;animation:sh 1.3s infinite
+}
+@keyframes sh{from{background-position:200% 0}to{background-position:-200% 0}}
+
+/* ── toast ───────────────────────────────────────────────────── */
+.toast{
+  position:fixed;left:50%;bottom:calc(max(24px,env(safe-area-inset-bottom)) + 6px);
+  transform:translateX(-50%) translateY(14px);
+  background:var(--card3);border:1px solid var(--line2);
+  color:var(--txt);padding:10px 18px;border-radius:var(--r2);
+  font-size:13px;font-weight:600;opacity:0;transition:.25s;pointer-events:none;z-index:999;
+  white-space:nowrap
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── settings modal ──────────────────────────────────────────── */
+.overlay{
+  position:fixed;inset:0;background:rgba(5,8,20,.88);backdrop-filter:blur(8px);
+  z-index:100;display:grid;place-items:flex-end;padding:env(safe-area-inset-top) 0 0;
+  opacity:0;pointer-events:none;transition:.2s
+}
+.overlay.open{opacity:1;pointer-events:auto}
+.modal{
+  width:100%;max-width:520px;margin:0 auto;
+  background:var(--bg2);border-top:1px solid var(--line2);
+  border-radius:24px 24px 0 0;padding:8px 20px calc(24px + env(safe-area-inset-bottom));
+  transform:translateY(30px);transition:.25s transform
+}
+.overlay.open .modal{transform:translateY(0)}
+.modal-drag{width:36px;height:4px;border-radius:2px;background:var(--line2);margin:8px auto 18px}
+.modal h2{font-size:16px;font-weight:800;margin-bottom:16px}
+.key-row{
+  display:flex;align-items:center;gap:10px;padding:12px 13px;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r2);margin-bottom:8px
+}
+.key-icon{font-size:18px}
+.key-info{flex:1}
+.key-info .kn{font-size:13.5px;font-weight:700}
+.key-info .kd{font-size:11.5px;color:var(--sub);margin-top:2px}
+.key-status{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px}
+.ks-ok{background:rgba(52,211,153,.14);color:#6ee7b7;border:1px solid rgba(52,211,153,.2)}
+.ks-no{background:rgba(248,113,113,.1);color:#fca5a5;border:1px solid rgba(248,113,113,.2)}
+.modal-note{font-size:11.5px;color:var(--sub);line-height:1.6;margin-top:14px;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r2);padding:11px 13px}
+.modal-note code{color:var(--acc);font-size:11px}
+.modal-close{
+  width:100%;margin-top:14px;padding:14px;border:0;border-radius:var(--r2);
+  background:var(--card2);color:var(--sub);font-size:14px;font-weight:700;cursor:pointer
+}
+.modal-close:active{background:var(--card3)}
+
+/* ── misc ────────────────────────────────────────────────────── */
+.gen-time{font-size:11px;color:var(--mut);text-align:center;padding-top:8px}
+
+/* ── plan pill / badges ──────────────────────────────────────── */
+.plan-pill{
+  font-size:10px;font-weight:800;letter-spacing:.6px;padding:5px 10px;
+  border-radius:999px;cursor:pointer;border:1px solid transparent
+}
+.plan-pro{background:var(--grad);color:#fff;box-shadow:0 3px 12px rgba(102,126,234,.4)}
+.plan-free{background:var(--card2);color:var(--sub);border-color:var(--line2)}
+.plan-dev{background:rgba(251,191,36,.14);color:#fde68a;border-color:rgba(251,191,36,.3)}
+.pill.fresh{background:rgba(236,72,153,.14);color:#f9a8d4;border:1px solid rgba(236,72,153,.25);font-size:9.5px}
+.pill.persona{background:rgba(155,89,255,.16);color:#d8b4fe;border:1px solid rgba(155,89,255,.3);font-size:9.5px}
+
+/* ── sheet forms (profile / upgrade) ─────────────────────────── */
+.f-label{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px}
+.f-input,.f-area{
+  width:100%;background:var(--card);border:1px solid var(--line2);border-radius:var(--r2);
+  color:var(--txt);font-size:14px;padding:12px 13px;outline:none;font-family:inherit
+}
+.f-input:focus,.f-area:focus{border-color:var(--acc)}
+.f-area{min-height:74px;resize:vertical;line-height:1.5}
+.tone-row{display:flex;gap:7px;flex-wrap:wrap}
+.tone-chip{
+  padding:8px 13px;border-radius:999px;border:1px solid var(--line2);
+  background:var(--card);color:var(--sub);font-size:12.5px;font-weight:600;cursor:pointer
+}
+.tone-chip.active{background:var(--grad);color:#fff;border-color:transparent}
+.sheet-cta{
+  width:100%;margin-top:18px;padding:15px;border:0;border-radius:var(--r2);
+  background:var(--grad);color:#fff;font-size:15px;font-weight:800;cursor:pointer;
+  box-shadow:0 8px 24px rgba(102,126,234,.35)
+}
+.sheet-cta:disabled{opacity:.6}
+.pro-feature{display:flex;align-items:center;gap:10px;padding:9px 0;font-size:13.5px;color:var(--sub)}
+.pro-feature .pf-icon{font-size:16px}
+.pro-feature b{color:var(--txt)}
+.price-line{display:flex;align-items:baseline;gap:6px;margin:6px 0 14px}
+.price-line .p{font-size:34px;font-weight:900;letter-spacing:-1px;
+  background:var(--grad2);-webkit-background-clip:text;background-clip:text;color:transparent}
+.price-line .per{color:var(--sub);font-size:13px}
+.dev-note{font-size:11px;color:#fde68a;background:rgba(251,191,36,.08);
+  border:1px solid rgba(251,191,36,.2);border-radius:var(--r3);padding:8px 11px;margin-top:12px;line-height:1.5}
+.err-note{font-size:12px;color:#fca5a5;margin-top:10px;display:none}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="scroll">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="logo">⚡</div>
+    <div class="brand-text">
+      <h1>Spark</h1>
+      <div class="sub">Daily content brief, ranked by momentum</div>
+    </div>
+    <div class="hdr-right">
+      <div class="live-badge" id="liveBadge" style="display:none">
+        <div class="live-dot"></div>LIVE
+      </div>
+      <button class="plan-pill plan-free" id="planPill" onclick="openPro()">FREE</button>
+      <button class="gear-btn" onclick="openProfile()" aria-label="Creator profile">👤</button>
+      <button class="gear-btn" onclick="openSettings()" aria-label="Settings">⚙</button>
+    </div>
+  </div>
+
+  <!-- Niche chips -->
+  <div class="niches" id="niches"></div>
+
+  <!-- Generate button -->
+  <div class="gen-wrap">
+    <button class="cta" id="genBtn">⚡ Generate today's brief</button>
+    <div class="gen-time" id="genTime" style="display:none"></div>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-pill"><span class="sv" id="sTrends">—</span><span class="sl">Trends</span></div>
+    <div class="stat-pill"><span class="sv" id="sVideos">—</span><span class="sl">Videos</span></div>
+    <div class="stat-pill"><span class="sv" id="sIdeas">—</span><span class="sl">Ideas</span></div>
+  </div>
+
+  <!-- Warn bar -->
+  <div id="warnArea"></div>
+
+  <!-- Tabs -->
+  <div class="tabs" id="tabs" style="display:none">
+    <button class="tab active" id="tabIdeas" onclick="switchTab('ideas')">
+      💡 Ideas <span class="badge" id="ideasBadge">0</span>
+    </button>
+    <button class="tab" id="tabSignals" onclick="switchTab('signals')">
+      🔥 Signals <span class="badge" id="sigsBadge">0</span>
+    </button>
+  </div>
+
+  <!-- Ideas panel -->
+  <div class="tab-panel active" id="panelIdeas">
+    <div class="cards" id="cards">
+      <div class="empty">
+        <div class="icon">✨</div>
+        <p>Pick a niche and tap <strong>Generate</strong> to see what's trending right now.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Signals panel -->
+  <div class="tab-panel" id="panelSignals">
+    <div class="sig-list" id="sigList">
+      <div class="empty">
+        <div class="icon">📡</div>
+        <p>Raw trend signals appear here after you generate a brief.</p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /scroll -->
+</div><!-- /app -->
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Settings modal -->
+<div class="overlay" id="overlay" onclick="maybeClose(event)">
+  <div class="modal" id="modal">
+    <div class="modal-drag"></div>
+    <h2>⚙ Settings</h2>
+
+    <div class="key-row">
+      <div class="key-icon">🎬</div>
+      <div class="key-info">
+        <div class="kn">YouTube Data API</div>
+        <div class="kd">Niche video momentum signals</div>
+      </div>
+      <div class="key-status" id="ytStatus">Checking…</div>
+    </div>
+
+    <div class="key-row">
+      <div class="key-icon">🤖</div>
+      <div class="key-info">
+        <div class="kn">LLM Polish</div>
+        <div class="kd">Sharper hooks &amp; titles (optional)</div>
+      </div>
+      <div class="key-status" id="llmStatus">Checking…</div>
+    </div>
+
+    <div class="modal-note" id="settingsNote">
+      To add or update keys, edit <code>.env</code> in the project root, then restart the server.<br><br>
+      YouTube key (free): <code>console.cloud.google.com</code><br>
+      → new project → enable <em>YouTube Data API v3</em> → Credentials → API key
+    </div>
+
+    <button class="modal-close" onclick="closeSettings()">Done</button>
+  </div>
+</div>
+
+<!-- Pro upgrade sheet -->
+<div class="overlay" id="proOverlay" onclick="if(event.target===this)closePro()">
+  <div class="modal">
+    <div class="modal-drag"></div>
+    <h2>⚡ Spark Pro</h2>
+    <div class="price-line"><span class="p">$9</span><span class="per">/ month · cancel anytime</span></div>
+    <div class="pro-feature"><span class="pf-icon">🔄</span><span><b>Fresh briefs on demand</b> — regenerate any time, not once a day</span></div>
+    <div class="pro-feature"><span class="pf-icon">🧠</span><span><b>AI-personalized ideas</b> — written for your channel, audience &amp; tone</span></div>
+    <div class="pro-feature"><span class="pf-icon">✍️</span><span><b>LLM-polished hooks &amp; titles</b> — scroll-stopping copy, not templates</span></div>
+    <div class="f-label">Your email</div>
+    <input class="f-input" id="proEmail" type="email" placeholder="you@example.com" autocomplete="email"/>
+    <div class="err-note" id="proErr"></div>
+    <button class="sheet-cta" id="proBtn" onclick="startCheckout()">Upgrade to Pro</button>
+    <div class="dev-note" id="proDevNote" style="display:none">
+      ⚠ Dev mode — no Stripe keys configured, so this simulates a purchase and unlocks Pro instantly.
+      Add <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_PRICE_ID</code> &amp; <code>STRIPE_WEBHOOK_SECRET</code> to <code>.env</code> to take real payments.
+    </div>
+    <button class="modal-close" onclick="closePro()">Not now</button>
+  </div>
+</div>
+
+<!-- Creator profile sheet -->
+<div class="overlay" id="profileOverlay" onclick="if(event.target===this)closeProfile()">
+  <div class="modal">
+    <div class="modal-drag"></div>
+    <h2>👤 Creator profile</h2>
+    <div class="f-label">Describe your channel</div>
+    <textarea class="f-area" id="pfChannel" placeholder="e.g. Calisthenics &amp; home workouts for busy people. No-equipment routines, honest supplement reviews."></textarea>
+    <div class="f-label">Who's your audience?</div>
+    <input class="f-input" id="pfAudience" placeholder="e.g. men 25-40 getting back in shape"/>
+    <div class="f-label">Tone</div>
+    <div class="tone-row" id="toneRow">
+      <button class="tone-chip" data-tone="energetic">⚡ Energetic</button>
+      <button class="tone-chip" data-tone="educational">🎓 Educational</button>
+      <button class="tone-chip" data-tone="funny">😂 Funny</button>
+      <button class="tone-chip" data-tone="no-nonsense">🎯 No-nonsense</button>
+    </div>
+    <button class="sheet-cta" onclick="saveProfile()">Save profile</button>
+    <div class="dev-note" id="pfNote" style="display:none">
+      🧠 Personalization uses an LLM. Add <code>ANTHROPIC_API_KEY</code> (or <code>OPENAI_API_KEY</code>) to <code>.env</code> for fully personalized copy — without it you get a lighter template-based personalization.
+    </div>
+    <button class="modal-close" onclick="closeProfile()">Cancel</button>
+  </div>
+</div>
+
+<script>
+const API = location.origin;
+const $ = s => document.querySelector(s);
+const make = (tag,cls,html) => { const e=document.createElement(tag); if(cls) e.className=cls; if(html!=null) e.innerHTML=html; return e; };
+
+/* ── state ─────────────────────────────────────────────────── */
+let niche = localStorage.getItem("spark_niche") || "fitness";
+let lastResult = null;
+let token = localStorage.getItem("spark_token") || "";
+let profile = JSON.parse(localStorage.getItem("spark_profile") || "{}");
+let plan = "free", devMode = false;
+const NICHE_ICONS = {fitness:"💪",trading:"📈",tech:"💻",general:"🌍"};
+
+/* Returning from Stripe Checkout: token arrives in the URL fragment. */
+(function(){
+  const m = location.hash.match(/token=([\w\-\.]+)/);
+  if(m){ token=m[1]; localStorage.setItem("spark_token",token);
+         history.replaceState(null,"",location.pathname); toast("⚡ Welcome to Pro!",2400); }
+  else if(location.hash.includes("billing=failed")){
+    history.replaceState(null,"",location.pathname); toast("Payment didn't complete",2400);
+  }
+})();
+
+/* ── utils ─────────────────────────────────────────────────── */
+function toast(msg, dur=1600){
+  const t=$("#toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(t._to); t._to=setTimeout(()=>t.classList.remove("show"), dur);
+}
+function copy(txt){
+  (navigator.clipboard?.writeText(txt) ?? Promise.reject()).then(()=>toast("✓ Copied to clipboard")).catch(()=>toast("Copy failed"));
+}
+function scoreColor(s){ return s>=70?"#34d399":s>=40?"#fbbf24":"#667eea"; }
+function ring(score){
+  const r=19, C=2*Math.PI*r, off=C*(1-score/100), col=scoreColor(score);
+  return `<div class="ring"><svg width="48" height="48">
+    <circle cx="24" cy="24" r="${r}" stroke="#1e2d4a" stroke-width="4" fill="none"/>
+    <circle cx="24" cy="24" r="${r}" stroke="${col}" stroke-width="4" fill="none"
+      stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
+  </svg><div class="rv" style="color:${col}">${Math.round(score)}</div></div>`;
+}
+
+/* ── tabs ──────────────────────────────────────────────────── */
+function switchTab(name){
+  $("#panelIdeas").classList.toggle("active", name==="ideas");
+  $("#panelSignals").classList.toggle("active", name==="signals");
+  $("#tabIdeas").classList.toggle("active", name==="ideas");
+  $("#tabSignals").classList.toggle("active", name==="signals");
+}
+
+/* ── niche chips ───────────────────────────────────────────── */
+async function loadNiches(){
+  const box=$("#niches");
+  let list=["fitness","trading","tech"];
+  try{const r=await fetch(API+"/api/niches");const j=await r.json();if(j.niches?.length)list=j.niches;}catch(_){}
+  box.innerHTML="";
+  list.forEach(n=>{
+    const icon = NICHE_ICONS[n] || "🌍";
+    const c=make("button","chip"+(n===niche?" active":""),`<span class="icon">${icon}</span>${n}`);
+    c.onclick=()=>{
+      niche=n; localStorage.setItem("spark_niche",n);
+      [...box.children].forEach(x=>x.classList.remove("active")); c.classList.add("active");
+    };
+    box.appendChild(c);
+  });
+}
+
+/* ── idea card ─────────────────────────────────────────────── */
+function ideaCard(idea, idx){
+  const isShort = (idea.format||"").toLowerCase().includes("short");
+  const isYT = (idea.kind||"") === "working_format";
+  const card = make("div","card"+(isYT?"":" trend"));
+  card.style.animationDelay=(idx*45)+"ms";
+
+  const ctop = make("div","ctop");
+  ctop.innerHTML = ring(idea.score);
+  const pills = make("div","pills");
+  let ph=`<span class="pill ${isShort?"short":"long"}">${idea.format}</span>`
+    +`<span class="pill ${isYT?"yt":"trend"}">${isYT?"🎬 YouTube":"🔍 Trending"}</span>`;
+  const age = idea.source_age_hours||0;
+  if(!isYT || age<=48) ph+=`<span class="pill fresh">🔥 NEW</span>`;
+  if(lastResult?.personalized) ph+=`<span class="pill persona">🧠 For you</span>`;
+  pills.innerHTML=ph;
+  ctop.appendChild(pills);
+  card.appendChild(ctop);
+
+  card.appendChild(make("div","card-title",idea.titles[0]||""));
+
+  if(idea.source_stat||idea.source_url){
+    const ev=make("div","evidence");
+    ev.innerHTML=`<span class="ev-icon">${isYT?"📊":"🔍"}</span><span class="ev-stat">${idea.source_stat||""}</span>`;
+    if(idea.source_url){
+      const a=make("a",null,"Watch ref ↗");
+      a.href=idea.source_url; a.target="_blank"; a.rel="noopener";
+      ev.appendChild(a);
+    }
+    card.appendChild(ev);
+  }
+
+  const hbox=make("div","hook-box");
+  hbox.innerHTML=`<span class="hl">💡 Hook</span>${idea.hook||""}`;
+  card.appendChild(hbox);
+
+  const d=make("details");
+  d.appendChild(make("summary",null,`<span class="arr">▶</span> 3 title options &amp; outline`));
+  const db=make("div","det-body");
+
+  db.appendChild(make("div","det-h","Title options"));
+  const ul=make("ul","titles");
+  (idea.titles||[]).forEach(t=>{
+    const li=make("li");
+    li.appendChild(make("span",null,t));
+    const btn=make("button","copy-btn","Copy");
+    btn.onclick=e=>{e.stopPropagation();copy(t);};
+    li.appendChild(btn);
+    ul.appendChild(li);
+  });
+  db.appendChild(ul);
+
+  db.appendChild(make("div","det-h","Outline"));
+  const ol=make("ol","outline");
+  (idea.outline||[]).forEach(s=>{const li=make("li",null,s);ol.appendChild(li);});
+  db.appendChild(ol);
+
+  d.appendChild(db);
+  card.appendChild(d);
+  return card;
+}
+
+/* ── signals tab ───────────────────────────────────────────── */
+function renderSignals(signals){
+  const list=$("#sigList"); list.innerHTML="";
+  if(!signals||!signals.length){
+    list.appendChild(make("div","empty",`<div class="icon">📡</div><p>No raw signals loaded yet.</p>`));
+    return;
+  }
+  const maxMetric=Math.max(...signals.map(s=>s.raw_metric||0),1);
+  signals.forEach((s,i)=>{
+    const card=make("div","sig-card");
+    const rank=make("div","sig-rank",`#${i+1}`);
+    card.appendChild(rank);
+    const body=make("div","sig-body");
+    body.appendChild(make("div","sig-query",s.topic||""));
+    const ev=(s.evidence||[])[0]||"";
+    body.appendChild(make("div","sig-ev",ev));
+    const pct=Math.round((s.raw_metric/maxMetric)*100);
+    const bwrap=make("div","vel-bar-wrap");
+    const bar=make("div","vel-bar");
+    bar.style.width="0%";
+    setTimeout(()=>bar.style.width=pct+"%",50+i*30);
+    bwrap.appendChild(bar); body.appendChild(bwrap);
+    const foot=make("div","sig-footer");
+    const src=make("div","sig-source");
+    src.innerHTML=(s.kind==="working_format")?"🎬 YouTube":"🔍 Trends";
+    foot.appendChild(src);
+    const url=(s.evidence||[]).find(e=>e.startsWith("http"));
+    if(url){const a=make("a","sig-link","Watch ↗");a.href=url;a.target="_blank";a.rel="noopener";foot.appendChild(a);}
+    body.appendChild(foot);
+    card.appendChild(body);
+    list.appendChild(card);
+  });
+}
+
+/* ── main generate ─────────────────────────────────────────── */
+async function generate(){
+  const btn=$("#genBtn");
+  btn.disabled=true;
+  btn.innerHTML='<span class="spinner"></span>Scanning trends…';
+  const cards=$("#cards"); cards.innerHTML="";
+  for(let i=0;i<3;i++) cards.appendChild(make("div","skel"));
+  $("#warnArea").innerHTML="";
+  $("#statsBar").classList.remove("vis");
+  $("#tabs").style.display="none";
+  $("#liveBadge").style.display="none";
+
+  try{
+    const r=await fetch(`${API}/api/brief`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json",
+               ...(token?{"Authorization":"Bearer "+token}:{})},
+      body:JSON.stringify({niche, top:12, refresh:false, profile})
+    });
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const j=await r.json();
+    lastResult=j;
+    plan=j.plan||"free"; devMode=!!j.dev_mode;
+    updatePlanPill();
+
+    const c=j.counts||{};
+    $("#sTrends").textContent=c.trends||0;
+    $("#sVideos").textContent=c.videos||0;
+    $("#sIdeas").textContent=j.ideas?.length||0;
+    $("#statsBar").classList.add("vis");
+    $("#ideasBadge").textContent=j.ideas?.length||0;
+    $("#sigsBadge").textContent=j.signals?.length||0;
+    $("#tabs").style.display="flex";
+    $("#liveBadge").style.display="flex";
+
+    const now=new Date(); const ts=`${now.getHours()}:${String(now.getMinutes()).padStart(2,"0")}`;
+    const gt=$("#genTime"); gt.textContent=`Generated at ${ts}`;gt.style.display="block";
+
+    if(!j.has_youtube){
+      $("#warnArea").innerHTML='<div class="warnbar">⚠ YouTube key not set — ideas use trends only. Tap ⚙ to configure.</div>';
+    }
+    if(j.llm_used){
+      toast("✨ LLM polish applied", 2000);
+    }
+
+    cards.innerHTML="";
+    if(!j.ideas||!j.ideas.length){
+      cards.appendChild(make("div","empty",`<div class="icon">🌙</div><p>No strong signals for <strong>${niche}</strong> right now. Try another niche or come back later.</p>`));
+    }else{
+      j.ideas.forEach((idea,i)=>cards.appendChild(ideaCard(idea,i)));
+    }
+
+    renderSignals(j.signals||[]);
+    switchTab("ideas");
+
+    // Update settings modal status
+    $("#ytStatus").className="key-status "+(j.has_youtube?"ks-ok":"ks-no");
+    $("#ytStatus").textContent=j.has_youtube?"✓ Active":"✗ Not set";
+    $("#llmStatus").className="key-status "+(j.llm_used?"ks-ok":"ks-no");
+    $("#llmStatus").textContent=j.llm_used?"✓ Active":"✗ Not set";
+
+  }catch(e){
+    cards.innerHTML="";
+    cards.appendChild(make("div","empty",`<div class="icon">⚠️</div><p>Could not reach the engine.<br><small>${e.message}</small></p>`));
+  }finally{
+    btn.disabled=false;
+    btn.innerHTML="⚡ Generate today's brief";
+  }
+}
+
+/* ── settings modal ────────────────────────────────────────── */
+function openSettings(){
+  if(lastResult){
+    const j=lastResult;
+    $("#ytStatus").className="key-status "+(j.has_youtube?"ks-ok":"ks-no");
+    $("#ytStatus").textContent=j.has_youtube?"✓ Active":"✗ Not set";
+    $("#llmStatus").className="key-status "+(j.llm_used?"ks-ok":"ks-no");
+    $("#llmStatus").textContent=j.llm_used?"✓ Active":"✗ Not set";
+  }else{
+    ["ytStatus","llmStatus"].forEach(id=>{$(("#"+id)).textContent="Generate first";$(("#"+id)).className="key-status ks-no";});
+  }
+  $("#overlay").classList.add("open");
+}
+function closeSettings(){ $("#overlay").classList.remove("open"); }
+function maybeClose(e){ if(e.target===$("#overlay")) closeSettings(); }
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeSettings(); });
+
+/* ── plan pill ─────────────────────────────────────────────── */
+function updatePlanPill(){
+  const p=$("#planPill");
+  if(devMode){ p.className="plan-pill plan-dev"; p.textContent="DEV · PRO"; }
+  else if(plan==="pro"){ p.className="plan-pill plan-pro"; p.textContent="⚡ PRO"; }
+  else { p.className="plan-pill plan-free"; p.textContent="FREE"; }
+}
+
+/* ── pro / billing ─────────────────────────────────────────── */
+function openPro(){
+  $("#proDevNote").style.display = devMode ? "block" : "none";
+  $("#proErr").style.display="none";
+  $("#proOverlay").classList.add("open");
+}
+function closePro(){ $("#proOverlay").classList.remove("open"); }
+
+async function startCheckout(){
+  const email=$("#proEmail").value.trim();
+  const err=$("#proErr");
+  if(!email.includes("@")){ err.textContent="Enter a valid email."; err.style.display="block"; return; }
+  const btn=$("#proBtn"); btn.disabled=true; btn.textContent="Starting checkout…";
+  try{
+    const r=await fetch(`${API}/api/checkout`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({email})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||("HTTP "+r.status));
+    if(j.dev && j.token){
+      token=j.token; localStorage.setItem("spark_token",token);
+      plan="pro"; updatePlanPill(); closePro();
+      toast("⚡ Pro unlocked (dev mode)",2400);
+    }else if(j.url){
+      location.href=j.url;   // off to Stripe Checkout
+    }
+  }catch(e){
+    err.textContent=e.message; err.style.display="block";
+  }finally{
+    btn.disabled=false; btn.textContent="Upgrade to Pro";
+  }
+}
+
+/* ── creator profile ───────────────────────────────────────── */
+function openProfile(){
+  $("#pfChannel").value=profile.channel||"";
+  $("#pfAudience").value=profile.audience||"";
+  [...$("#toneRow").children].forEach(c=>c.classList.toggle("active",c.dataset.tone===profile.tone));
+  $("#pfNote").style.display = lastResult&&!lastResult.llm_available ? "block" : "none";
+  $("#profileOverlay").classList.add("open");
+}
+function closeProfile(){ $("#profileOverlay").classList.remove("open"); }
+function saveProfile(){
+  profile={
+    channel:$("#pfChannel").value.trim(),
+    audience:$("#pfAudience").value.trim(),
+    tone:[...$("#toneRow").children].find(c=>c.classList.contains("active"))?.dataset.tone||"",
+  };
+  localStorage.setItem("spark_profile",JSON.stringify(profile));
+  closeProfile();
+  const has=Object.values(profile).some(v=>v);
+  toast(has?"👤 Profile saved — next brief is personalized":"Profile cleared",2200);
+}
+[...document.querySelectorAll("#toneRow .tone-chip")].forEach(c=>{
+  c.onclick=()=>{
+    const was=c.classList.contains("active");
+    [...$("#toneRow").children].forEach(x=>x.classList.remove("active"));
+    if(!was)c.classList.add("active");
+  };
+});
+
+/* ── init ──────────────────────────────────────────────────── */
+$("#genBtn").onclick=generate;
+loadNiches();
+(async function(){
+  try{
+    const r=await fetch(`${API}/api/me`,{headers:token?{"Authorization":"Bearer "+token}:{}});
+    const j=await r.json();
+    plan=j.plan||"free"; devMode=!!j.dev_mode; updatePlanPill();
+  }catch(_){ updatePlanPill(); }
+})();
+</script>
+</body>
+</html>

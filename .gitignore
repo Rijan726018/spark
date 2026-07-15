@@ -1,0 +1,35 @@
+node_modules/
+.venv/
+.venv312/
+__pycache__/
+*.pyc
+.claude/
+.vscode/
+
+# Environment (never commit real credentials)
+.env
+!.env.example
+
+# Spark runtime state (lives on the deploy volume, never in git)
+spark_users.db
+brief_cache/
+content_digests/
+.pytest_cache/
+*.log
+
+# Generated algorithm files (replaced by parametric engine in engines/parametric_loader.py)
+generated_algos/
+
+# Backtest result files (large, binary-like CSVs — tracked in SQLite instead)
+results/
+data_cache/
+
+# Build artifacts
+frontend/dist/
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,35 @@
+# Secrets — never bake credentials into the image (set via `fly secrets set`)
+.env
+!.env.example
+
+# Local state that must live on the volume, not in the image
+*.db
+brief_cache/
+content_digests/
+
+# Nexus bulk not needed by the Spark image
+results/
+generated_algos/
+data_cache/
+ninjatrader_exports/
+frontend/
+electron/
+server/
+backend/
+engines/
+algos/
+
+# Dev/build junk
+.git/
+.github/
+.claude/
+.vscode/
+.pytest_cache/
+.venv/
+.venv312/
+node_modules/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+Thumbs.db

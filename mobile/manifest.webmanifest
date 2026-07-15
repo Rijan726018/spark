@@ -1,0 +1,17 @@
+{
+  "name": "Spark — Daily Content Ideas",
+  "short_name": "Spark",
+  "description": "Today's content ideas, ranked by live trend momentum.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0f1a",
+  "theme_color": "#0b0f1a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

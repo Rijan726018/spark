@@ -1,0 +1,8 @@
+src = open('algos/algo_01_bb_cvd.py', encoding='utf-8').read()
+src = src.replace('INTERVAL     = "5m"', 'INTERVAL     = "1h"')
+src = src.replace('PERIOD       = "60d"', 'PERIOD       = "730d"')
+src = src.replace('CVD_LOOKBACK = 5', 'CVD_LOOKBACK = 8')
+src = src.replace('algo_01_bb_cvd.png', 'algo_01_bb_cvd_1h.png')
+src = src.replace('algo_01_trades.csv', 'algo_01_1h_trades.csv')
+open('algos/algo_01_bb_cvd_1h.py', 'w', encoding='utf-8').write(src)
+print('algo_01_bb_cvd_1h.py created OK')
