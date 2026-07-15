@@ -682,7 +682,12 @@ async function generate(){
                ...(token?{"Authorization":"Bearer "+token}:{})},
       body:JSON.stringify({niche, top:12, refresh:false, profile})
     });
-    if(!r.ok) throw new Error("HTTP "+r.status);
+    if(!r.ok){
+      const body=await r.json().catch(()=>({}));
+      const err=new Error(body.error||("HTTP "+r.status));
+      err.friendly=!!body.error;
+      throw err;
+    }
     const j=await r.json();
     lastResult=j;
     plan=j.plan||"free"; devMode=!!j.dev_mode;
@@ -726,7 +731,8 @@ async function generate(){
 
   }catch(e){
     cards.innerHTML="";
-    cards.appendChild(make("div","empty",`<div class="icon">⚠️</div><p>Could not reach the engine.<br><small>${e.message}</small></p>`));
+    const msg=e.friendly?e.message:`Could not reach the engine.<br><small>${e.message}</small>`;
+    cards.appendChild(make("div","empty",`<div class="icon">⚠️</div><p>${msg}</p>`));
   }finally{
     btn.disabled=false;
     btn.innerHTML="⚡ Generate today's brief";

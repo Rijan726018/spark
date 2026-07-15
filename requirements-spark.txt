@@ -1,0 +1,14 @@
+# Spark deploy image — only what trend_api + trend_engine + spark_billing import.
+# (trend_engine is requests + stdlib; .env loading is the zero-dep trend_engine/env.py.)
+# Nexus's full stack stays in requirements.txt for local dev.
+fastapi==0.116.1
+uvicorn==0.35.0
+starlette==0.47.3
+pydantic==2.12.5
+pydantic_core==2.41.5
+requests==2.32.5
+
+# transitive pins kept explicit for reproducible builds
+annotated-types==0.7.0
+typing_extensions==4.15.0
+anyio==4.12.1

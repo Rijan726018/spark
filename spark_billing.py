@@ -51,7 +51,11 @@ def live_mode() -> bool:
 # ── user store ────────────────────────────────────────────────────────────────
 
 def _db() -> sqlite3.Connection:
-    conn = sqlite3.connect(_DB_PATH)
+    # SPARK_DB_PATH points the store at the deploy volume; resolved per-call so
+    # tests can monkeypatch _DB_PATH and the env can be set after import.
+    path = Path(os.getenv("SPARK_DB_PATH") or _DB_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
