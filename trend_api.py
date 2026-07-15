@@ -137,6 +137,11 @@ def _brief_response(req: BriefRequest, token: str) -> JSONResponse:
 
 # ── routes ────────────────────────────────────────────────────────────────────
 
+@app.get("/healthz")
+def healthz() -> JSONResponse:
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/niches")
 def niches() -> JSONResponse:
     return JSONResponse({"niches": list(NICHE_PRESETS.keys())})

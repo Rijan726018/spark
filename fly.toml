@@ -1,0 +1,43 @@
+# Fly.io config for Spark (trend_api). Deploy day: Thu Jul 16.
+#
+# One-time setup after `fly auth signup` (founder does auth personally):
+#   fly apps create spark-brief            # pick another name if taken, update `app` below
+#   fly volumes create spark_data --size 1 --region ord
+#   fly secrets set YOUTUBE_API_KEY=... ANTHROPIC_API_KEY=... \
+#       STRIPE_SECRET_KEY=... STRIPE_PRICE_ID=... STRIPE_WEBHOOK_SECRET=...
+#   fly deploy
+#
+# SPARK_DB_PATH / SPARK_CACHE_DIR env overrides land Thursday morning —
+# deploy only after they exist, or user tokens die on redeploy.
+
+app = "spark-brief"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  SPARK_DB_PATH = "/data/spark_users.db"
+  SPARK_CACHE_DIR = "/data/brief_cache"
+
+[mounts]
+  source = "spark_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false      # PWA morning-brief traffic must never hit a cold start
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
