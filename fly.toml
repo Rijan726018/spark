@@ -10,7 +10,7 @@
 # SPARK_DB_PATH / SPARK_CACHE_DIR env overrides land Thursday morning —
 # deploy only after they exist, or user tokens die on redeploy.
 
-app = "spark-brief"
+app = "sparkbrief"
 primary_region = "ord"
 
 [build]
@@ -19,6 +19,7 @@ primary_region = "ord"
 [env]
   SPARK_DB_PATH = "/data/spark_users.db"
   SPARK_CACHE_DIR = "/data/brief_cache"
+  SPARK_PUBLIC_URL = "https://sparkbrief.fly.dev"
 
 [mounts]
   source = "spark_data"

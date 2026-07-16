@@ -34,7 +34,7 @@ def _from_addr() -> str:
 
 
 def _public_url() -> str:
-    return os.getenv("SPARK_PUBLIC_URL", "https://spark-brief.fly.dev").strip().rstrip("/")
+    return os.getenv("SPARK_PUBLIC_URL", "https://sparkbrief.fly.dev").strip().rstrip("/")
 
 
 def email_configured() -> bool:
