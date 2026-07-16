@@ -24,6 +24,8 @@ from pathlib import Path
 
 import requests
 
+import spark_email
+
 STRIPE_API = "https://api.stripe.com/v1"
 _DB_PATH = Path(__file__).parent / "spark_users.db"
 _TIMEOUT = 20
@@ -101,6 +103,18 @@ def user_by_token(token: str) -> dict | None:
     conn = _db()
     try:
         row = conn.execute("SELECT * FROM users WHERE token=?", (token,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def user_by_email(email: str) -> dict | None:
+    email = email.strip().lower()
+    if not email:
+        return None
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
         return dict(row) if row else None
     finally:
         conn.close()
@@ -204,9 +218,15 @@ def handle_webhook_event(event: dict) -> None:
     if etype == "checkout.session.completed":
         email = (obj.get("customer_details") or {}).get("email") or obj.get("customer_email")
         if email:
-            issue_token(email, plan="pro",
-                        stripe_customer=str(obj.get("customer") or ""),
-                        stripe_subscription=str(obj.get("subscription") or ""))
+            token = issue_token(email, plan="pro",
+                                stripe_customer=str(obj.get("customer") or ""),
+                                stripe_subscription=str(obj.get("subscription") or ""))
+            try:
+                spark_email.send_token_email(email, token)
+            except Exception:
+                # send_token_email already fails soft; this guard keeps any
+                # surprise from ever failing a paid webhook.
+                pass
     elif etype in ("customer.subscription.deleted", "customer.subscription.paused"):
         sub_id = str(obj.get("id") or "")
         if sub_id:

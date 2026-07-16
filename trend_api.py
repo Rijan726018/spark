@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import spark_billing as billing
+import spark_email
 from trend_engine.config import NICHE_PRESETS, Settings
 from trend_engine.llm import llm_provider
 from trend_engine.pipeline import run
@@ -395,6 +396,30 @@ async def stripe_webhook(request: Request) -> JSONResponse:
         return JSONResponse({"error": "bad payload"}, status_code=400)
     billing.handle_webhook_event(event)
     return JSONResponse({"received": True})
+
+
+class RecoverRequest(BaseModel):
+    email: str
+
+
+@app.post("/api/token/recover")
+def recover_token(req: RecoverRequest, request: Request) -> JSONResponse:
+    """Re-email an existing token (cleared browser data, new phone, etc.).
+
+    The response is identical whether or not the email has an account, so this
+    endpoint can't be used to enumerate customers. Rate-limited like the other
+    spending routes because each hit can trigger an outbound email.
+    """
+    if _rate_limited(_client_ip(request)):
+        return _rate_limit_response()
+    email = req.email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return JSONResponse({"error": "Enter a valid email."}, status_code=400)
+    user = billing.user_by_email(email)
+    if user:
+        spark_email.send_token_email(email, user["token"])
+    return JSONResponse({"ok": True,
+                         "message": "If that email has an account, the token is on its way."})
 
 
 # ── PWA ───────────────────────────────────────────────────────────────────────
