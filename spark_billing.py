@@ -192,6 +192,31 @@ def confirm_checkout_session(session_id: str) -> str | None:
                        stripe_subscription=str(s.get("subscription") or ""))
 
 
+def create_portal_session(token: str, return_url: str) -> dict:
+    """Stripe Billing Portal for the token's user: manage card, cancel, invoices.
+
+    Returns {'url': ...} or {'error': ...}. Dev mode has no Stripe customer to
+    manage, so it reports that instead of a URL.
+    """
+    user = user_by_token(token)
+    if not user:
+        return {"error": "Unknown token."}
+    if not live_mode():
+        return {"error": "Dev mode — there is no Stripe subscription to manage."}
+    customer = user.get("stripe_customer") or ""
+    if not customer:
+        return {"error": "No Stripe customer on file for this account — "
+                         "reply to your welcome email and we'll sort it out."}
+    resp = requests.post(
+        f"{STRIPE_API}/billing_portal/sessions",
+        auth=(stripe_secret(), ""),
+        data={"customer": customer, "return_url": return_url},
+        timeout=_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return {"url": resp.json()["url"]}
+
+
 def verify_webhook(payload: bytes, sig_header: str, tolerance: int = 300) -> bool:
     """Verify a Stripe webhook signature (Stripe-Signature: t=...,v1=...)."""
     secret = webhook_secret()

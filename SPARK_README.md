@@ -46,6 +46,40 @@ python3 -m trend_engine --niche trading --no-youtube    # trends only
 python3 -m trend_engine --niche "vegan cooking"         # any custom niche
 ```
 
+## API surface
+
+Free (cached data only, no founder spend):
+
+- `POST/GET /api/brief` — today's brief (preset niches; custom niche/geo/profile are Pro)
+- `GET /api/niches` — preset list
+- `GET /api/history?niche=` — dates with a cached brief
+- `GET /api/brief/archive?niche=&date=` — a past day's brief
+- `GET /api/brief.md?niche=&date=` — Markdown export (paste into Notion/Obsidian)
+- `POST /api/feedback` — 👍/👎 an idea (`{niche, topic, vote: 1|-1}`)
+
+Pro (Bearer token from checkout):
+
+- `POST /api/brief` with `refresh`, `geo` (2-letter country), and/or `profile`
+  — personalized briefs are cached per user per day, so refreshes are cheap
+- `POST /api/expand` — one idea → full shooting script (beats, b-roll,
+  description, hashtags); LLM-written when a key is set, template otherwise
+- `GET/POST/DELETE /api/saves` — server-side saved-ideas library
+- `GET/PUT /api/prefs` — default niche/geo + creator profile; once saved,
+  every brief is personalized automatically
+- `GET/POST/DELETE /api/digest` — daily brief emailed each morning
+  (`{niche, hour}`, server-time; needs an email provider configured)
+- `POST /api/billing/portal` — Stripe self-serve portal (cancel, card, invoices)
+
+Ops:
+
+- `GET /healthz` — health check
+- `GET /api/admin/stats` — counters (users, spend, cache); enabled by setting
+  `SPARK_ADMIN_TOKEN`, sent back only to the matching `X-Admin-Token` header
+
+Spend caps: `SPARK_DAILY_RUN_BUDGET` (engine runs/day, default 10),
+`SPARK_DAILY_EXPAND_BUDGET` (script expansions/day, default 200),
+`SPARK_RATE_LIMIT_PER_MIN` (per-IP, default 30).
+
 ## Niches
 
 Presets live in `trend_engine/config.py` (`fitness`, `trading`, `tech`), each a
@@ -56,7 +90,9 @@ names become a generic niche built from the words given.
 ## Tests
 
 ```bash
-python3 -m pytest tests/test_trend_engine.py   # 10 tests, no network needed
+python3 -m pytest tests/test_trend_engine.py tests/test_trend_api.py \
+    tests/test_spark_features.py tests/test_spark_billing.py \
+    tests/test_spark_email.py            # no network needed
 ```
 
 ## Daily automation
@@ -89,7 +125,11 @@ trend_engine/
   report.py        # Markdown + JSON digests
   pipeline.py      # end-to-end run()
   cli.py           # python -m trend_engine
-trend_api.py       # FastAPI server: /api/brief, /api/niches, serves the PWA
+trend_api.py       # FastAPI server: briefs, history, expand, digest, billing; serves the PWA
+spark_billing.py   # Stripe checkout/webhooks/portal + user store (sqlite, zero deps)
+spark_store.py     # user data: saved ideas, prefs, digest subs, feedback (same sqlite file)
+spark_expand.py    # idea -> full shooting script (LLM with template fallback)
+spark_email.py     # token + daily-digest email (Resend or SMTP, fails soft)
 mobile/index.html  # the PWA (no build step — vanilla HTML/CSS/JS)
 tests/test_trend_engine.py
 ```

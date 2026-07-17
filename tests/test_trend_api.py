@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import spark_billing as billing
+import spark_store
 import trend_api
 
 
@@ -23,6 +24,7 @@ def isolated(tmp_path, monkeypatch):
                 "SPARK_DB_PATH", "SPARK_CACHE_DIR"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(billing, "_DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(spark_store, "_DB_PATH", tmp_path / "users.db")
     monkeypatch.setattr(trend_api, "CACHE_DIR", tmp_path / "cache")
     trend_api.CACHE_DIR.mkdir()
     monkeypatch.setattr(trend_api, "_mem_cache", {})
@@ -31,7 +33,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(trend_api, "_run_counts", {})
     monkeypatch.setattr(trend_api, "DAILY_RUN_BUDGET", 100)
     monkeypatch.setattr(trend_api, "_run_brief",
-                        lambda niche, top, profile, use_llm: dict(FAKE_BRIEF))
+                        lambda niche, top, profile, use_llm, geo="": dict(FAKE_BRIEF))
     yield
 
 
@@ -92,7 +94,7 @@ def test_cache_miss_stampede_runs_engine_once(monkeypatch):
     calls = {"n": 0}
     started = threading.Barrier(5, timeout=5)
 
-    def slow_engine(niche, top, profile, use_llm):
+    def slow_engine(niche, top, profile, use_llm, geo=""):
         calls["n"] += 1
         return dict(FAKE_BRIEF)
 
@@ -134,7 +136,7 @@ def test_startup_guard_allows_full_config_and_dev_mode(monkeypatch):
 def test_case_variants_share_one_cache_key_and_engine_run(client, monkeypatch):
     calls = {"n": 0}
 
-    def counting_engine(niche, top, profile, use_llm):
+    def counting_engine(niche, top, profile, use_llm, geo=""):
         calls["n"] += 1
         return dict(FAKE_BRIEF)
 
@@ -155,7 +157,7 @@ def test_daily_run_budget_caps_engine_spend(client, monkeypatch):
     monkeypatch.setattr(billing, "effective_plan", lambda token: "pro")
     calls = {"n": 0}
 
-    def counting_engine(niche, top, profile, use_llm):
+    def counting_engine(niche, top, profile, use_llm, geo=""):
         calls["n"] += 1
         return dict(FAKE_BRIEF)
 

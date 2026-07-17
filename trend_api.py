@@ -11,22 +11,26 @@ and "Upgrade" simulates a purchase. Paste STRIPE_* keys in .env to go live.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
 import sys
 import threading
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Header, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import spark_billing as billing
 import spark_email
+import spark_expand
+import spark_store
 from trend_engine.config import NICHE_PRESETS, Settings
 from trend_engine.llm import llm_provider
 from trend_engine.pipeline import run
@@ -74,16 +78,24 @@ def _billing_config_guard() -> None:
 
 
 class Profile(BaseModel):
-    channel: str = ""
-    audience: str = ""
-    tone: str = ""
+    channel: str = Field(default="", max_length=300)
+    audience: str = Field(default="", max_length=200)
+    tone: str = Field(default="", max_length=60)
 
 
 class BriefRequest(BaseModel):
     niche: str = "fitness"
     top: int = Field(default=12, ge=1, le=25)
     refresh: bool = False
+    geo: str = ""                     # 2-letter country code; Pro for non-default
     profile: Profile | None = None
+
+
+_GEO_RE = re.compile(r"^[A-Za-z]{2}$")
+
+
+def _auth_token(authorization: str) -> str:
+    return authorization.removeprefix("Bearer ").strip()
 
 
 # ── cache ─────────────────────────────────────────────────────────────────────
@@ -214,10 +226,31 @@ def _budget_response() -> JSONResponse:
         status_code=503, headers={"Retry-After": "3600"})
 
 
+# Idea expansion is LLM-only spend (no YouTube quota), so it gets its own,
+# larger daily budget.
+DAILY_EXPAND_BUDGET = int(os.getenv("SPARK_DAILY_EXPAND_BUDGET", "200"))
+
+_expand_counts: dict[str, int] = {}   # iso date -> expansions today
+
+
+def _try_reserve_expand() -> bool:
+    today = date.today().isoformat()
+    with _budget_guard:
+        for old in [d for d in _expand_counts if d != today]:
+            del _expand_counts[old]
+        if _expand_counts.get(today, 0) >= DAILY_EXPAND_BUDGET:
+            return False
+        _expand_counts[today] = _expand_counts.get(today, 0) + 1
+        return True
+
+
 # ── engine ────────────────────────────────────────────────────────────────────
 
-def _run_brief(niche: str, top: int, profile: dict | None, use_llm: bool) -> dict:
+def _run_brief(niche: str, top: int, profile: dict | None, use_llm: bool,
+               geo: str = "") -> dict:
     settings = Settings.from_env()
+    if geo:
+        settings.geo = geo
     result = run(niche, settings=settings, top=top, use_llm=use_llm, profile=profile)
     return {
         "niche": result["niche"],
@@ -228,6 +261,12 @@ def _run_brief(niche: str, top: int, profile: dict | None, use_llm: bool) -> dic
         "has_youtube": bool(settings.youtube_api_key),
         "llm_used": result.get("llm_used", False),
     }
+
+
+def _user_hash(token: str, profile: dict | None) -> str:
+    """Stable per-user+profile cache suffix; changing the profile invalidates it."""
+    raw = token + "|" + json.dumps(profile or {}, sort_keys=True)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 def _brief_response(req: BriefRequest, token: str) -> JSONResponse:
@@ -254,20 +293,43 @@ def _brief_response(req: BriefRequest, token: str) -> JSONResponse:
             status_code=403)
 
     profile = req.profile.model_dump() if req.profile else None
+    # Pro users with saved preferences get them applied automatically: an
+    # explicit inline profile always wins, saved prefs fill the gap.
+    prefs = spark_store.get_prefs(token) if plan == "pro" and token else None
+    if not (profile and any(profile.values())) and prefs:
+        profile = {k: prefs.get(k, "") for k in ("channel", "audience", "tone")}
+
+    geo = req.geo.strip().upper()
+    if geo and not _GEO_RE.match(geo):
+        return JSONResponse({"error": "geo must be a 2-letter country code."},
+                            status_code=422)
+    if not geo and prefs and prefs.get("geo"):
+        geo = prefs["geo"]
+    if not geo:
+        geo = settings.geo
+    # A non-default geo is fresh engine spend per country — Pro only, like
+    # custom niches.
+    if plan != "pro" and geo != settings.geo:
+        return JSONResponse({"error": "Region selection is a Pro feature."},
+                            status_code=403)
+
     has_profile = bool(profile and any(profile.values()))
     personalized = plan == "pro" and has_profile
 
-    key = _cache_key(niche, settings.geo)
+    key = _cache_key(niche, geo)
 
     if personalized or (plan == "pro" and req.refresh):
-        # Pro + personalization/refresh runs the engine for this user — if the
-        # daily budget allows; otherwise degrade to today's shared brief.
-        if _try_reserve_run():
+        # Personalized briefs are cached per user+profile for the day, so a
+        # Pro user re-opening the app doesn't burn an engine run each time.
+        ukey = key + ":u" + _user_hash(token, profile) if personalized else key
+        data = None if req.refresh else (_cache_get(ukey) if personalized else None)
+        if data is None and _try_reserve_run():
             data = _run_brief(niche, req.top, profile if personalized else None,
-                              use_llm=True)
-            if not personalized:
-                _cache_put(key, data)   # a forced refresh updates the shared brief
-        else:
+                              use_llm=True, geo=geo)
+            # Cache under the user key (personalized) or update the shared
+            # brief (forced refresh).
+            _cache_put(ukey, data)
+        if data is None:
             data = _cache_get(key, max_age=86400)   # same-day key: any age today
             if data is None:
                 return _budget_response()
@@ -292,7 +354,8 @@ def _brief_response(req: BriefRequest, token: str) -> JSONResponse:
                         if data is None:
                             return _budget_response()
                     else:
-                        data = _run_brief(niche, req.top, None, use_llm=True)
+                        data = _run_brief(niche, req.top, None, use_llm=True,
+                                          geo=geo)
                         _cache_put(key, data)
             finally:
                 lock.release()
@@ -300,6 +363,7 @@ def _brief_response(req: BriefRequest, token: str) -> JSONResponse:
     return JSONResponse({
         **data,
         "plan": plan,
+        "geo": geo,
         "dev_mode": not billing.live_mode(),
         "personalized": personalized,
         "llm_available": bool(llm_provider()),
@@ -325,7 +389,7 @@ def brief_post(req: BriefRequest, request: Request,
                authorization: str = Header(default="")) -> JSONResponse:
     if _rate_limited(_client_ip(request)):
         return _rate_limit_response()
-    token = authorization.removeprefix("Bearer ").strip()
+    token = _auth_token(authorization)
     return _brief_response(req, token)
 
 
@@ -336,13 +400,13 @@ def brief_get(request: Request,
     """GET kept for the CLI / curl convenience; same behavior as POST without profile."""
     if _rate_limited(_client_ip(request)):
         return _rate_limit_response()
-    token = authorization.removeprefix("Bearer ").strip()
+    token = _auth_token(authorization)
     return _brief_response(BriefRequest(niche=niche, top=top), token)
 
 
 @app.get("/api/me")
 def me(authorization: str = Header(default="")) -> JSONResponse:
-    token = authorization.removeprefix("Bearer ").strip()
+    token = _auth_token(authorization)
     user = billing.user_by_token(token)
     return JSONResponse({
         "plan": billing.effective_plan(token),
@@ -420,6 +484,429 @@ def recover_token(req: RecoverRequest, request: Request) -> JSONResponse:
         spark_email.send_token_email(email, user["token"])
     return JSONResponse({"ok": True,
                          "message": "If that email has an account, the token is on its way."})
+
+
+# ── billing portal ────────────────────────────────────────────────────────────
+
+@app.post("/api/billing/portal")
+def billing_portal(request: Request,
+                   authorization: str = Header(default="")) -> JSONResponse:
+    """Stripe Billing Portal link: update card, see invoices, cancel — self-serve."""
+    if _rate_limited(_client_ip(request)):
+        return _rate_limit_response()
+    token = _auth_token(authorization)
+    if not token:
+        return JSONResponse({"error": "Sign in with your Pro token first."},
+                            status_code=401)
+    try:
+        out = billing.create_portal_session(
+            token, return_url=str(request.base_url).rstrip("/"))
+    except Exception as e:
+        return JSONResponse({"error": f"Portal failed: {e}"}, status_code=502)
+    if "error" in out:
+        return JSONResponse(out, status_code=400)
+    return JSONResponse(out)
+
+
+# ── brief history + export ───────────────────────────────────────────────────
+# Both read the on-disk cache only — no engine spend, safe for every plan.
+
+_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.json$")
+
+
+def _valid_niche(niche: str) -> str | None:
+    niche = niche.strip().lower()
+    if niche and len(niche) <= MAX_NICHE_LEN and re.fullmatch(
+            r"[a-z0-9][a-z0-9 &+\-'.]*", niche):
+        return niche
+    return None
+
+
+@app.get("/api/history")
+def history(niche: str = Query("fitness"), geo: str = Query("")) -> JSONResponse:
+    """Dates that have a cached brief for this niche, newest first."""
+    n = _valid_niche(niche)
+    if n is None:
+        return JSONResponse({"error": "Invalid niche."}, status_code=422)
+    g = geo.strip().upper() or Settings.from_env().geo
+    if not _GEO_RE.match(g):
+        return JSONResponse({"error": "Invalid geo."}, status_code=422)
+    dates = []
+    for p in CACHE_DIR.glob(f"{n}_{g}_*.json"):
+        m = _DATE_RE.search(p.name)
+        if m:
+            dates.append(m.group(1))
+    return JSONResponse({"niche": n, "geo": g,
+                         "dates": sorted(dates, reverse=True)[:60]})
+
+
+def _archived_brief(niche: str, geo: str, day: str) -> dict | None:
+    p = _cache_path(f"{niche}:{geo}:{day}")
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+@app.get("/api/brief/archive")
+def brief_archive(niche: str = Query("fitness"), date_: str = Query("", alias="date"),
+                  geo: str = Query("")) -> JSONResponse:
+    """A past day's cached brief (default: today's, any age)."""
+    n = _valid_niche(niche)
+    if n is None:
+        return JSONResponse({"error": "Invalid niche."}, status_code=422)
+    g = geo.strip().upper() or Settings.from_env().geo
+    day = date_.strip() or date.today().isoformat()
+    if not _GEO_RE.match(g) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return JSONResponse({"error": "Invalid geo or date."}, status_code=422)
+    data = _archived_brief(n, g, day)
+    if data is None:
+        return JSONResponse({"error": f"No cached brief for {n} on {day}."},
+                            status_code=404)
+    return JSONResponse({**data, "archived": True})
+
+
+def _brief_markdown(data: dict) -> str:
+    lines = [f"# Spark Brief — {str(data.get('niche', '')).title()} — "
+             f"{data.get('date', '')}", ""]
+    for i, idea in enumerate(data.get("ideas", []), 1):
+        titles = idea.get("titles") or [idea.get("topic", "")]
+        lines.append(f"## {i}. {titles[0]}")
+        lines.append(f"- **Momentum:** {idea.get('score', 0):.0f}/100 · "
+                     f"**Format:** {idea.get('format', '')}")
+        if idea.get("why_now"):
+            lines.append(f"- **Why now:** {idea['why_now']}")
+        if idea.get("hook"):
+            lines.append(f"- **Hook:** {idea['hook']}")
+        if len(titles) > 1:
+            lines.append("- **Title options:**")
+            lines += [f"    - {t}" for t in titles]
+        if idea.get("outline"):
+            lines.append("- **Outline:**")
+            lines += [f"    - {step}" for step in idea["outline"]]
+        if idea.get("source_url"):
+            lines.append(f"- **Reference:** {idea['source_url']} "
+                         f"({idea.get('source_stat', '')})")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@app.get("/api/brief.md")
+def brief_markdown(niche: str = Query("fitness"), date_: str = Query("", alias="date"),
+                   geo: str = Query("")) -> PlainTextResponse:
+    """A cached brief as Markdown — paste straight into Notion/Obsidian."""
+    n = _valid_niche(niche)
+    g = geo.strip().upper() or Settings.from_env().geo
+    day = date_.strip() or date.today().isoformat()
+    if n is None or not _GEO_RE.match(g) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return PlainTextResponse("Invalid niche, geo, or date.", status_code=422)
+    data = _archived_brief(n, g, day)
+    if data is None:
+        return PlainTextResponse(f"No cached brief for {n} on {day}.",
+                                 status_code=404)
+    return PlainTextResponse(_brief_markdown(data), media_type="text/markdown")
+
+
+# ── idea expansion (Pro) ──────────────────────────────────────────────────────
+
+class ExpandRequest(BaseModel):
+    niche: str = "fitness"
+    idea: dict
+
+
+@app.post("/api/expand")
+def expand(req: ExpandRequest, request: Request,
+           authorization: str = Header(default="")) -> JSONResponse:
+    """Turn one brief idea into a full shooting script (beats, b-roll,
+    description, hashtags). Pro-only: each call can be an LLM request."""
+    if _rate_limited(_client_ip(request)):
+        return _rate_limit_response()
+    token = _auth_token(authorization)
+    if billing.effective_plan(token) != "pro":
+        return JSONResponse({"error": "Full scripts are a Pro feature."},
+                            status_code=403)
+    niche = _valid_niche(req.niche)
+    if niche is None:
+        return JSONResponse({"error": "Invalid niche."}, status_code=422)
+    try:
+        raw = json.dumps(req.idea)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "Invalid idea payload."}, status_code=422)
+    if not str(req.idea.get("topic", "")).strip() or len(raw) > 6000:
+        return JSONResponse({"error": "Send one idea object from /api/brief."},
+                            status_code=422)
+    if not _try_reserve_expand():
+        return JSONResponse(
+            {"error": "Today's script capacity is used up — try again tomorrow."},
+            status_code=503, headers={"Retry-After": "3600"})
+    prefs = spark_store.get_prefs(token) if token else None
+    profile = ({k: prefs.get(k, "") for k in ("channel", "audience", "tone")}
+               if prefs else None)
+    script = spark_expand.expand_idea(req.idea, niche, profile=profile)
+    return JSONResponse({"niche": niche, "script": script})
+
+
+# ── saved ideas (requires an account token) ──────────────────────────────────
+
+def _require_user(authorization: str) -> tuple[str, dict] | JSONResponse:
+    token = _auth_token(authorization)
+    user = billing.user_by_token(token)
+    if not user:
+        return JSONResponse(
+            {"error": "This needs an account — upgrade to Pro (or use the dev "
+                      "checkout) to get a token."}, status_code=401)
+    return token, user
+
+
+class SaveRequest(BaseModel):
+    niche: str = ""
+    idea: dict
+
+
+@app.post("/api/saves")
+def save_idea(req: SaveRequest, request: Request,
+              authorization: str = Header(default="")) -> JSONResponse:
+    if _rate_limited(_client_ip(request)):
+        return _rate_limit_response()
+    auth = _require_user(authorization)
+    if isinstance(auth, JSONResponse):
+        return auth
+    token, _ = auth
+    try:
+        raw = json.dumps(req.idea)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "Invalid idea payload."}, status_code=422)
+    if not str(req.idea.get("topic", "")).strip() or len(raw) > 6000:
+        return JSONResponse({"error": "Send one idea object from /api/brief."},
+                            status_code=422)
+    out = spark_store.save_idea(token, req.niche.strip().lower()[:MAX_NICHE_LEN],
+                                req.idea)
+    if not out["saved"]:
+        return JSONResponse({"error": "Saved-ideas limit reached — delete a few "
+                                      "before saving more."}, status_code=409)
+    return JSONResponse(out)
+
+
+@app.get("/api/saves")
+def get_saves(authorization: str = Header(default="")) -> JSONResponse:
+    auth = _require_user(authorization)
+    if isinstance(auth, JSONResponse):
+        return auth
+    token, _ = auth
+    return JSONResponse({"saves": spark_store.list_saves(token)})
+
+
+@app.delete("/api/saves/{save_id}")
+def delete_save(save_id: int,
+                authorization: str = Header(default="")) -> JSONResponse:
+    auth = _require_user(authorization)
+    if isinstance(auth, JSONResponse):
+        return auth
+    token, _ = auth
+    if not spark_store.delete_save(token, save_id):
+        return JSONResponse({"error": "Not found."}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+# ── preferences ───────────────────────────────────────────────────────────────
+
+class PrefsRequest(BaseModel):
+    niche: str = Field(default="", max_length=MAX_NICHE_LEN)
+    geo: str = Field(default="", max_length=2)
+    channel: str = Field(default="", max_length=300)
+    audience: str = Field(default="", max_length=200)
+    tone: str = Field(default="", max_length=60)
+
+
+@app.get("/api/prefs")
+def get_prefs(authorization: str = Header(default="")) -> JSONResponse:
+    auth = _require_user(authorization)
+    if isinstance(auth, JSONResponse):
+        return auth
+    token, _ = auth
+    prefs = spark_store.get_prefs(token) or {}
+    return JSONResponse({k: prefs.get(k, "") for k in
+                         ("niche", "geo", "channel", "audience", "tone")})
+
+
+@app.put("/api/prefs")
+def put_prefs(req: PrefsRequest, request: Request,
+              authorization: str = Header(default="")) -> JSONResponse:
+    """Save default niche/region + creator profile. Once saved, every brief is
+    personalized automatically — no need to resend the profile per request."""
+    if _rate_limited(_client_ip(request)):
+        return _rate_limit_response()
+    auth = _require_user(authorization)
+    if isinstance(auth, JSONResponse):
+        return auth
+    token, _ = auth
+    niche = req.niche.strip().lower()
+    if niche and _valid_niche(niche) is None:
+        return JSONResponse({"error": "Invalid niche."}, status_code=422)
+    geo = req.geo.strip().upper()
+    if geo and not _GEO_RE.match(geo):
+        return JSONResponse({"error": "geo must be a 2-letter country code."},
+                            status_code=422)
+    out = spark_store.set_prefs(token, niche=niche, geo=geo,
+                                channel=req.channel.strip(),
+                                audience=req.audience.strip(),
+                                tone=req.tone.strip())
+    return JSONResponse(out)
+
+
+# ── daily email digest (Pro) ──────────────────────────────────────────────────
+
+class DigestRequest(BaseModel):
+    niche: str = "fitness"
+    hour: int = Field(default=7, ge=0, le=23)   # server time (UTC on Fly)
+
+
+@app.get("/api/digest")
+def get_digest(authorization: str = Header(default="")) -> JSONResponse:
+    auth = _require_user(authorization)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, user = auth
+    sub = spark_store.get_digest(user["email"])
+    return JSONResponse({"subscribed": sub is not None,
+                         "niche": sub["niche"] if sub else "",
+                         "hour": sub["hour"] if sub else 7,
+                         "email_configured": spark_email.email_configured()})
+
+
+@app.post("/api/digest")
+def subscribe_digest(req: DigestRequest, request: Request,
+                     authorization: str = Header(default="")) -> JSONResponse:
+    """Subscribe the account's own email to a daily brief. Pro-only (digests
+    can trigger engine runs), and only ever sends to the verified paying email."""
+    if _rate_limited(_client_ip(request)):
+        return _rate_limit_response()
+    auth = _require_user(authorization)
+    if isinstance(auth, JSONResponse):
+        return auth
+    token, user = auth
+    if billing.effective_plan(token) != "pro":
+        return JSONResponse({"error": "The daily email digest is a Pro feature."},
+                            status_code=403)
+    niche = _valid_niche(req.niche)
+    if niche is None:
+        return JSONResponse({"error": "Invalid niche."}, status_code=422)
+    spark_store.upsert_digest(user["email"], token, niche, req.hour)
+    return JSONResponse({"ok": True, "niche": niche, "hour": req.hour,
+                         "email": user["email"],
+                         "email_configured": spark_email.email_configured()})
+
+
+@app.delete("/api/digest")
+def unsubscribe_digest(authorization: str = Header(default="")) -> JSONResponse:
+    auth = _require_user(authorization)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, user = auth
+    spark_store.delete_digest(user["email"])
+    return JSONResponse({"ok": True})
+
+
+DIGEST_CHECK_SECONDS = 300
+_digest_thread: threading.Thread | None = None
+
+
+def _digest_tick(now: datetime | None = None) -> int:
+    """Send every due digest. Returns how many were sent. Runs on the scheduler
+    thread; separated so tests can drive it directly with a fake clock."""
+    now = now or datetime.now()
+    today = now.date().isoformat()
+    sent = 0
+    for sub in spark_store.digests_due(today, now.hour):
+        if billing.effective_plan(sub["token"]) != "pro":
+            continue   # churned — stop sending; row stays in case they return
+        key = _cache_key(sub["niche"], Settings.from_env().geo)
+        data = _cache_get(key, max_age=86400)
+        if data is None and _try_reserve_run():
+            # A paying subscriber's morning brief is worth an engine run.
+            try:
+                data = _run_brief(sub["niche"], 12, None, use_llm=True)
+                _cache_put(key, data)
+            except Exception as e:
+                print(f"[digest] engine run for {sub['niche']} failed: {e}",
+                      file=sys.stderr)
+        if not data or not data.get("ideas"):
+            continue   # nothing to send — retry on a later tick today
+        if spark_email.send_digest_email(sub["email"], sub["niche"],
+                                         data.get("date", today), data["ideas"]):
+            spark_store.mark_digest_sent(sub["email"], today)
+            sent += 1
+    return sent
+
+
+def _digest_loop() -> None:
+    while True:
+        time.sleep(DIGEST_CHECK_SECONDS)
+        try:
+            _digest_tick()
+        except Exception as e:   # the scheduler must survive anything
+            print(f"[digest] tick failed: {e}", file=sys.stderr)
+
+
+@app.on_event("startup")
+def _start_digest_scheduler() -> None:
+    global _digest_thread
+    if not spark_email.email_configured():
+        return   # no provider configured — nothing would ever send
+    if _digest_thread is None or not _digest_thread.is_alive():
+        _digest_thread = threading.Thread(target=_digest_loop, daemon=True,
+                                          name="spark-digest")
+        _digest_thread.start()
+
+
+# ── idea feedback ─────────────────────────────────────────────────────────────
+
+class FeedbackRequest(BaseModel):
+    niche: str = "fitness"
+    topic: str = Field(min_length=1, max_length=200)
+    vote: int
+
+
+@app.post("/api/feedback")
+def feedback(req: FeedbackRequest, request: Request,
+             authorization: str = Header(default="")) -> JSONResponse:
+    """👍/👎 an idea. One vote per user (or IP) per topic; re-voting updates."""
+    if _rate_limited(_client_ip(request)):
+        return _rate_limit_response()
+    if req.vote not in (-1, 1):
+        return JSONResponse({"error": "vote must be 1 or -1."}, status_code=422)
+    niche = _valid_niche(req.niche)
+    if niche is None:
+        return JSONResponse({"error": "Invalid niche."}, status_code=422)
+    token = _auth_token(authorization)
+    actor = token if billing.user_by_token(token) else "ip:" + _client_ip(request)
+    spark_store.record_feedback(actor, niche, req.topic.strip(), req.vote)
+    return JSONResponse({"ok": True})
+
+
+# ── founder/admin stats ───────────────────────────────────────────────────────
+
+@app.get("/api/admin/stats")
+def admin_stats(x_admin_token: str = Header(default="")) -> JSONResponse:
+    """Operational counters. Enabled only when SPARK_ADMIN_TOKEN is set; the
+    route 404s otherwise so it doesn't advertise itself."""
+    expected = os.getenv("SPARK_ADMIN_TOKEN", "").strip()
+    if not expected or not hmac.compare_digest(x_admin_token.encode(),
+                                               expected.encode()):
+        return JSONResponse({"error": "Not found."}, status_code=404)
+    today = date.today().isoformat()
+    return JSONResponse({
+        **spark_store.counts(),
+        "runs_today": _run_counts.get(today, 0),
+        "run_budget": DAILY_RUN_BUDGET,
+        "expansions_today": _expand_counts.get(today, 0),
+        "expand_budget": DAILY_EXPAND_BUDGET,
+        "cached_briefs": len(list(CACHE_DIR.glob("*.json"))),
+        "live_mode": billing.live_mode(),
+        "email_configured": spark_email.email_configured(),
+    })
 
 
 # ── PWA ───────────────────────────────────────────────────────────────────────

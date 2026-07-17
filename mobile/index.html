@@ -346,6 +346,30 @@ ol.outline li::before{
 .dev-note{font-size:11px;color:#fde68a;background:rgba(251,191,36,.08);
   border:1px solid rgba(251,191,36,.2);border-radius:var(--r3);padding:8px 11px;margin-top:12px;line-height:1.5}
 .err-note{font-size:12px;color:#fca5a5;margin-top:10px;display:none}
+
+/* ── pro restore / active state ──────────────────────────────── */
+.pro-active{
+  display:flex;align-items:center;gap:10px;
+  background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.25);
+  border-radius:var(--r2);padding:14px;margin:4px 0 6px
+}
+.pro-active .pa-icon{font-size:22px}
+.pro-active .pa-title{font-size:14.5px;font-weight:800;color:#6ee7b7}
+.pro-active .pa-sub{font-size:11.5px;color:var(--sub);margin-top:2px;word-break:break-all}
+.restore-link{
+  display:block;width:100%;margin-top:14px;padding:6px;border:0;background:none;
+  font-size:12.5px;color:var(--acc);font-weight:700;text-align:center;cursor:pointer;
+  font-family:inherit
+}
+.restore-row{display:flex;gap:8px}
+.restore-row .f-input{flex:1;min-width:0}
+.restore-btn{
+  flex:0 0 auto;padding:0 16px;border:1px solid var(--line2);border-radius:var(--r2);
+  background:var(--card3);color:var(--txt);font-size:13px;font-weight:700;cursor:pointer;
+  transition:.15s
+}
+.restore-btn:active{background:var(--acc);border-color:transparent;color:#fff}
+.restore-btn:disabled{opacity:.6;pointer-events:none}
 </style>
 </head>
 <body>
@@ -463,19 +487,48 @@ ol.outline li::before{
   <div class="modal">
     <div class="modal-drag"></div>
     <h2>⚡ Spark Pro</h2>
-    <div class="price-line"><span class="p">$9</span><span class="per">/ month · cancel anytime</span></div>
-    <div class="pro-feature"><span class="pf-icon">🔄</span><span><b>Fresh briefs on demand</b> — regenerate any time, not once a day</span></div>
-    <div class="pro-feature"><span class="pf-icon">🧠</span><span><b>AI-personalized ideas</b> — written for your channel, audience &amp; tone</span></div>
-    <div class="pro-feature"><span class="pf-icon">✍️</span><span><b>LLM-polished hooks &amp; titles</b> — scroll-stopping copy, not templates</span></div>
-    <div class="f-label">Your email</div>
-    <input class="f-input" id="proEmail" type="email" placeholder="you@example.com" autocomplete="email"/>
-    <div class="err-note" id="proErr"></div>
-    <button class="sheet-cta" id="proBtn" onclick="startCheckout()">Upgrade to Pro</button>
-    <div class="dev-note" id="proDevNote" style="display:none">
-      ⚠ Dev mode — no Stripe keys configured, so this simulates a purchase and unlocks Pro instantly.
-      Add <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_PRICE_ID</code> &amp; <code>STRIPE_WEBHOOK_SECRET</code> to <code>.env</code> to take real payments.
+
+    <div id="proActiveBox" style="display:none">
+      <div class="pro-active">
+        <span class="pa-icon">✅</span>
+        <div>
+          <div class="pa-title">You're on Spark Pro</div>
+          <div class="pa-sub" id="proWho">Fresh briefs, personalization &amp; LLM polish are unlocked.</div>
+        </div>
+      </div>
     </div>
-    <button class="modal-close" onclick="closePro()">Not now</button>
+
+    <div id="proUpgradeBox">
+      <div class="price-line"><span class="p">$9</span><span class="per">/ month · cancel anytime</span></div>
+      <div class="pro-feature"><span class="pf-icon">🔄</span><span><b>Fresh briefs on demand</b> — regenerate any time, not once a day</span></div>
+      <div class="pro-feature"><span class="pf-icon">🧠</span><span><b>AI-personalized ideas</b> — written for your channel, audience &amp; tone</span></div>
+      <div class="pro-feature"><span class="pf-icon">✍️</span><span><b>LLM-polished hooks &amp; titles</b> — scroll-stopping copy, not templates</span></div>
+      <div class="f-label">Your email</div>
+      <input class="f-input" id="proEmail" type="email" placeholder="you@example.com" autocomplete="email"/>
+      <div class="err-note" id="proErr"></div>
+      <button class="sheet-cta" id="proBtn" onclick="startCheckout()">Upgrade to Pro</button>
+      <div class="dev-note" id="proDevNote" style="display:none">
+        ⚠ Dev mode — no Stripe keys configured, so this simulates a purchase and unlocks Pro instantly.
+        Add <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_PRICE_ID</code> &amp; <code>STRIPE_WEBHOOK_SECRET</code> to <code>.env</code> to take real payments.
+      </div>
+      <button class="restore-link" onclick="toggleRestore()">Already Pro? Restore your access →</button>
+    </div>
+
+    <div id="restoreBox" style="display:none">
+      <div class="f-label">Email me my token</div>
+      <div class="restore-row">
+        <input class="f-input" id="recEmail" type="email" placeholder="you@example.com" autocomplete="email"/>
+        <button class="restore-btn" id="recBtn" onclick="recoverToken()">Send</button>
+      </div>
+      <div class="f-label">Or paste your access token</div>
+      <div class="restore-row">
+        <input class="f-input" id="recToken" placeholder="Token from your email" autocomplete="off" spellcheck="false"/>
+        <button class="restore-btn" id="actBtn" onclick="activateToken()">Activate</button>
+      </div>
+      <div class="err-note" id="recMsg"></div>
+    </div>
+
+    <button class="modal-close" id="proClose" onclick="closePro()">Not now</button>
   </div>
 </div>
 
@@ -513,7 +566,7 @@ let niche = localStorage.getItem("spark_niche") || "fitness";
 let lastResult = null;
 let token = localStorage.getItem("spark_token") || "";
 let profile = JSON.parse(localStorage.getItem("spark_profile") || "{}");
-let plan = "free", devMode = false;
+let plan = "free", devMode = false, userEmail = "";
 const NICHE_ICONS = {fitness:"💪",trading:"📈",tech:"💻",general:"🌍"};
 
 /* Returning from Stripe Checkout: token arrives in the URL fragment. */
@@ -768,11 +821,71 @@ function updatePlanPill(){
 
 /* ── pro / billing ─────────────────────────────────────────── */
 function openPro(){
+  // Dev mode reports everyone as pro; keep the upgrade/restore UI reachable there.
+  const isPro = plan==="pro" && !devMode;
+  $("#proActiveBox").style.display = isPro ? "block" : "none";
+  $("#proUpgradeBox").style.display = isPro ? "none" : "block";
+  $("#proWho").textContent = userEmail
+    ? `Signed in as ${userEmail}`
+    : "Fresh briefs, personalization & LLM polish are unlocked.";
   $("#proDevNote").style.display = devMode ? "block" : "none";
   $("#proErr").style.display="none";
+  $("#recMsg").style.display="none";
+  $("#restoreBox").style.display="none";
+  $("#proClose").textContent = isPro ? "Done" : "Not now";
   $("#proOverlay").classList.add("open");
 }
 function closePro(){ $("#proOverlay").classList.remove("open"); }
+
+/* ── restore access (recover / paste token) ────────────────── */
+function toggleRestore(){
+  const b=$("#restoreBox");
+  b.style.display = b.style.display==="none" ? "block" : "none";
+  if(b.style.display==="block") $("#recEmail").focus();
+}
+function showRecMsg(text, ok){
+  const m=$("#recMsg");
+  m.textContent=text; m.style.display="block";
+  m.style.color = ok ? "#6ee7b7" : "#fca5a5";
+}
+async function recoverToken(){
+  const email=$("#recEmail").value.trim();
+  if(!email.includes("@")){ showRecMsg("Enter a valid email.",false); return; }
+  const btn=$("#recBtn"); btn.disabled=true; btn.textContent="…";
+  try{
+    const r=await fetch(`${API}/api/token/recover`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({email})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||("HTTP "+r.status));
+    showRecMsg(j.message||"If that email has an account, the token is on its way.",true);
+  }catch(e){
+    showRecMsg(e.message,false);
+  }finally{
+    btn.disabled=false; btn.textContent="Send";
+  }
+}
+async function activateToken(){
+  const t=$("#recToken").value.trim();
+  if(!t){ showRecMsg("Paste the token from your email first.",false); return; }
+  const btn=$("#actBtn"); btn.disabled=true; btn.textContent="…";
+  try{
+    const r=await fetch(`${API}/api/me`,{headers:{"Authorization":"Bearer "+t}});
+    const j=await r.json();
+    if(j.plan==="pro"){
+      token=t; localStorage.setItem("spark_token",t);
+      plan="pro"; devMode=!!j.dev_mode; userEmail=j.email||"";
+      updatePlanPill(); closePro();
+      toast("⚡ Pro restored — welcome back!",2400);
+    }else{
+      showRecMsg("That token isn't active. Check for typos, or email yourself a fresh one above.",false);
+    }
+  }catch(e){
+    showRecMsg("Couldn't verify the token — check your connection and try again.",false);
+  }finally{
+    btn.disabled=false; btn.textContent="Activate";
+  }
+}
 
 async function startCheckout(){
   const email=$("#proEmail").value.trim();
@@ -787,7 +900,7 @@ async function startCheckout(){
     if(!r.ok) throw new Error(j.error||("HTTP "+r.status));
     if(j.dev && j.token){
       token=j.token; localStorage.setItem("spark_token",token);
-      plan="pro"; updatePlanPill(); closePro();
+      plan="pro"; userEmail=email; updatePlanPill(); closePro();
       toast("⚡ Pro unlocked (dev mode)",2400);
     }else if(j.url){
       location.href=j.url;   // off to Stripe Checkout
@@ -834,7 +947,7 @@ loadNiches();
   try{
     const r=await fetch(`${API}/api/me`,{headers:token?{"Authorization":"Bearer "+token}:{}});
     const j=await r.json();
-    plan=j.plan||"free"; devMode=!!j.dev_mode; updatePlanPill();
+    plan=j.plan||"free"; devMode=!!j.dev_mode; userEmail=j.email||""; updatePlanPill();
   }catch(_){ updatePlanPill(); }
 })();
 </script>

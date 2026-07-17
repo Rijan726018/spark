@@ -59,6 +59,51 @@ def _token_email_body(token: str) -> str:
     )
 
 
+def _digest_email_body(niche: str, day: str, ideas: list[dict]) -> str:
+    lines = [
+        f"Your Spark brief — {niche} — {day}",
+        "",
+        f"{len(ideas)} ready-to-shoot ideas, ranked by momentum:",
+        "",
+    ]
+    for i, idea in enumerate(ideas, 1):
+        titles = idea.get("titles") or [idea.get("topic", "")]
+        lines.append(f"{i}. {titles[0]}")
+        lines.append(f"   Format: {idea.get('format', '')}")
+        if idea.get("hook"):
+            lines.append(f"   Hook:   {idea['hook']}")
+        if idea.get("why_now"):
+            lines.append(f"   Why:    {idea['why_now']}")
+        lines.append("")
+    lines += [
+        f"Full outlines, scripts and more: {_public_url()}",
+        "",
+        "— Spark",
+        "",
+        "To stop these emails, open the app and turn off the daily digest.",
+    ]
+    return "\n".join(lines)
+
+
+def send_digest_email(to: str, niche: str, day: str, ideas: list[dict]) -> bool:
+    """Email the day's brief. Fails soft like send_token_email. Never raises."""
+    subject = f"⚡ Today's {niche} brief — {len(ideas)} ideas ({day})"
+    body = _digest_email_body(niche, day, ideas)
+    try:
+        if os.getenv("RESEND_API_KEY", "").strip():
+            _send_resend(to, subject, body)
+        elif os.getenv("SMTP_HOST", "").strip():
+            _send_smtp(to, subject, body)
+        else:
+            logger.warning("No email provider configured — digest for %s NOT sent.", to)
+            return False
+        logger.info("Digest email sent to %s", to)
+        return True
+    except Exception as e:
+        logger.error("Digest email to %s failed (%s).", to, e)
+        return False
+
+
 def _send_resend(to: str, subject: str, body: str) -> None:
     resp = requests.post(
         RESEND_API,
