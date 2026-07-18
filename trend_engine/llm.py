@@ -102,7 +102,7 @@ def _call_openai(prompt: str) -> str | None:
             f"{base}/chat/completions",
             headers={"Authorization": f"Bearer {key}", "content-type": "application/json"},
             json={"model": model, "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 1500},
+                  "max_completion_tokens": 1500},
             timeout=_TIMEOUT,
         )
         r.raise_for_status()

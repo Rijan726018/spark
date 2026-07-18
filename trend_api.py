@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import spark_analyze
 import spark_billing as billing
 import spark_email
 import spark_expand
@@ -242,6 +243,33 @@ def _try_reserve_expand() -> bool:
             return False
         _expand_counts[today] = _expand_counts.get(today, 0) + 1
         return True
+
+
+# Deep video analysis spends a Supadata transcript credit + a (vision) LLM
+# call per uncached video, so it gets its own daily budget.
+DAILY_ANALYZE_BUDGET = int(os.getenv("SPARK_DAILY_ANALYZE_BUDGET", "40"))
+
+_analyze_counts: dict[str, int] = {}   # iso date -> analyses today
+
+
+def _try_reserve_analyze() -> bool:
+    today = date.today().isoformat()
+    with _budget_guard:
+        for old in [d for d in _analyze_counts if d != today]:
+            del _analyze_counts[old]
+        if _analyze_counts.get(today, 0) >= DAILY_ANALYZE_BUDGET:
+            return False
+        _analyze_counts[today] = _analyze_counts.get(today, 0) + 1
+        return True
+
+
+def _release_analyze() -> None:
+    """Give a reserved slot back when the analysis produced nothing and spent
+    nothing (bad/dead video id, YouTube outage)."""
+    today = date.today().isoformat()
+    with _budget_guard:
+        if _analyze_counts.get(today, 0) > 0:
+            _analyze_counts[today] -= 1
 
 
 # ── engine ────────────────────────────────────────────────────────────────────
@@ -646,6 +674,85 @@ def expand(req: ExpandRequest, request: Request,
                if prefs else None)
     script = spark_expand.expand_idea(req.idea, niche, profile=profile)
     return JSONResponse({"niche": niche, "script": script})
+
+
+# ── deep video analysis (Pro) ─────────────────────────────────────────────────
+
+class AnalyzeRequest(BaseModel):
+    video: str = Field(..., max_length=200)   # YouTube URL or 11-char video id
+    niche: str = "fitness"
+
+
+@app.post("/api/analyze")
+def analyze(req: AnalyzeRequest, request: Request,
+            authorization: str = Header(default="")) -> JSONResponse:
+    """Why is this exact video working — hook, structure, title/thumbnail
+    formula, audience read, and how to make your version. Pro-only: each
+    uncached call spends a transcript credit + a vision LLM request."""
+    if _rate_limited(_client_ip(request)):
+        return _rate_limit_response()
+    token = _auth_token(authorization)
+    if billing.effective_plan(token) != "pro":
+        return JSONResponse({"error": "Video breakdowns are a Pro feature."},
+                            status_code=403)
+    niche = _valid_niche(req.niche)
+    if niche is None:
+        return JSONResponse({"error": "Invalid niche."}, status_code=422)
+    vid = spark_analyze.video_id_from(req.video)
+    if vid is None:
+        return JSONResponse({"error": "Send a YouTube video URL or id."},
+                            status_code=422)
+    if not os.getenv("YOUTUBE_API_KEY", "").strip():
+        return JSONResponse({"error": "Video analysis needs the YouTube API "
+                                      "configured on the server."},
+                            status_code=503)
+
+    # One analysis per video+niche per day; an analysis barely changes
+    # intraday, and the cache is what makes launch-day traffic affordable.
+    key = f"analysis:{vid}:{niche}:{date.today().isoformat()}"
+    cached = _cache_get(key, max_age=86400)
+    if cached is not None:
+        return JSONResponse({**cached, "cached": True})
+
+    # One generation per video+niche: without this, every Pro user tapping the
+    # same card during the 15-45s pipeline spends their own transcript credit
+    # and vision call, and a slow failing racer can overwrite a good analysis.
+    lock = _gen_lock(key)
+    if not lock.acquire(timeout=8):
+        return JSONResponse(
+            {"error": "This breakdown is being generated — try again in a few "
+                      "seconds."},
+            status_code=503, headers={"Retry-After": "10"})
+    try:
+        cached = _cache_get(key, max_age=86400)
+        if cached is not None:
+            return JSONResponse({**cached, "cached": True})
+
+        if not _try_reserve_analyze():
+            return JSONResponse(
+                {"error": "Today's video-analysis capacity is used up — try "
+                          "again tomorrow."},
+                status_code=503, headers={"Retry-After": "3600"})
+        try:
+            result = spark_analyze.analyze_video(vid, niche)
+        except Exception as e:                      # never 500 on a paid route
+            print(f"[analyze] {vid}: {e}")
+            result = None
+        if result is None:
+            # Nothing was produced and nothing was spent (the pipeline stops at
+            # metadata) — a dead link must not burn the day's capacity.
+            _release_analyze()
+            return JSONResponse({"error": "Couldn't fetch that video — check "
+                                          "the link and try again."},
+                                status_code=404)
+        # A template analysis while an LLM IS configured means the provider
+        # failed: serve it, keep the budget (a transcript credit was spent),
+        # but never cache it — otherwise one blip serves a stub all day.
+        if result["analysis"].get("llm_used") or not llm_provider():
+            _cache_put(key, result)
+        return JSONResponse(result)
+    finally:
+        lock.release()
 
 
 # ── saved ideas (requires an account token) ──────────────────────────────────

@@ -342,6 +342,22 @@ ol.outline li::before{
 .modal-close:hover{color:var(--text)}
 .modal-close.ghost{border-color:transparent;background:transparent;color:var(--text3)}
 .modal-close.ghost:hover{color:var(--text2)}
+/* why-this-works */
+.ana-btn{margin-left:auto;border:1px solid var(--border-strong);background:transparent;
+  color:var(--text2);font:inherit;font-size:11.5px;padding:3px 9px;border-radius:99px;cursor:pointer}
+.ana-btn:hover{color:var(--text);border-color:var(--text3)}
+.ana-verdict{font-size:14.5px;font-weight:600;line-height:1.45;margin-bottom:14px}
+.ana-sec{margin:14px 0 4px;font-size:11px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--text3)}
+.ana-quote{border-left:2px solid var(--border-strong);padding:6px 10px;margin:6px 0;
+  font-style:italic;font-size:13.5px}
+.ana-why{font-size:13px;color:var(--text2);line-height:1.5}
+.ana-list{margin:4px 0 0 18px;font-size:13px;line-height:1.65;color:var(--text2)}
+.ana-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+.ana-chip{font-size:10.5px;padding:2px 8px;border-radius:99px;border:1px solid var(--border)}
+.ana-chip.on{color:var(--success);border-color:var(--success)}
+.ana-chip.off{color:var(--text3)}
+.ana-loading{text-align:center;padding:28px 0;color:var(--text3);font-size:13px}
 
 /* ── misc ────────────────────────────────────────────────────── */
 .gen-time{font-size:12px;color:var(--text3);text-align:center;padding-top:8px}
@@ -644,10 +660,25 @@ button:focus-visible,.chip:focus-visible,.tab:focus-visible{
   </div>
 </div>
 
+<!-- Why this works sheet -->
+<div class="overlay" id="anaOverlay" onclick="if(event.target===this)closeAna()">
+  <div class="modal">
+    <div class="modal-drag"></div>
+    <h2>Why this works</h2>
+    <div id="anaBody"></div>
+    <button class="modal-close ghost" onclick="closeAna()">Close</button>
+  </div>
+</div>
+
 <script>
 const API = location.origin;
 const $ = s => document.querySelector(s);
 const make = (tag,cls,html) => { const e=document.createElement(tag); if(cls) e.className=cls; if(html!=null) e.innerHTML=html; return e; };
+/* Escape anything that originated outside this file — LLM output, YouTube
+   video titles, Google Trends titles — before it reaches an innerHTML sink.
+   A video title is attacker-controlled, and a token lives in localStorage. */
+const escA = s => String(s??"").replace(/[&<>"']/g,
+  c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 /* Inline icon set — 24-viewBox, stroke 1.5, currentColor. */
 const IC = {
@@ -748,21 +779,26 @@ function ideaCard(idea, idx){
   ctop.appendChild(pills);
   card.appendChild(ctop);
 
-  card.appendChild(make("div","card-title",idea.titles[0]||""));
+  card.appendChild(make("div","card-title",escA(idea.titles[0]||"")));
 
   if(idea.source_stat||idea.source_url){
     const ev=make("div","evidence");
-    ev.innerHTML=`${IC.bars}<span class="ev-stat">${idea.source_stat||""}</span>`;
-    if(idea.source_url){
+    ev.innerHTML=`${IC.bars}<span class="ev-stat">${escA(idea.source_stat||"")}</span>`;
+    if(idea.source_url && /^https?:\/\//i.test(idea.source_url)){
       const a=make("a",null,"Source ↗");
       a.href=idea.source_url; a.target="_blank"; a.rel="noopener";
       ev.appendChild(a);
+      if(/youtu\.?be/.test(idea.source_url)){
+        const b=make("button","ana-btn","Why this works");
+        b.onclick=e=>{e.stopPropagation();openAnalysis(idea.source_url);};
+        ev.appendChild(b);
+      }
     }
     card.appendChild(ev);
   }
 
   const hbox=make("div","hook-box");
-  hbox.innerHTML=`<span class="hl">Hook</span>${idea.hook||""}`;
+  hbox.innerHTML=`<span class="hl">Hook</span>${escA(idea.hook||"")}`;
   card.appendChild(hbox);
 
   const d=make("details");
@@ -773,7 +809,7 @@ function ideaCard(idea, idx){
   const ul=make("ul","titles");
   (idea.titles||[]).forEach(t=>{
     const li=make("li");
-    li.appendChild(make("span",null,t));
+    li.appendChild(make("span",null,escA(t)));
     const btn=make("button","copy-btn",IC.copy+"Copy");
     btn.onclick=e=>{e.stopPropagation();copy(t);};
     li.appendChild(btn);
@@ -783,7 +819,7 @@ function ideaCard(idea, idx){
 
   db.appendChild(make("div","det-h","Outline"));
   const ol=make("ol","outline");
-  (idea.outline||[]).forEach(s=>{const li=make("li",null,s);ol.appendChild(li);});
+  (idea.outline||[]).forEach(s=>{const li=make("li",null,escA(s));ol.appendChild(li);});
   db.appendChild(ol);
 
   d.appendChild(db);
@@ -804,9 +840,9 @@ function renderSignals(signals){
     const rank=make("div","sig-rank",String(i+1).padStart(2,"0"));
     card.appendChild(rank);
     const body=make("div","sig-body");
-    body.appendChild(make("div","sig-query",s.topic||""));
+    body.appendChild(make("div","sig-query",escA(s.topic||"")));
     const ev=(s.evidence||[])[0]||"";
-    body.appendChild(make("div","sig-ev",ev));
+    body.appendChild(make("div","sig-ev",escA(ev)));
     const pct=Math.round((s.raw_metric/maxMetric)*100);
     const bwrap=make("div","vel-bar-wrap");
     const bar=make("div","vel-bar");
@@ -817,7 +853,7 @@ function renderSignals(signals){
     const src=make("div","sig-source");
     src.innerHTML=(s.kind==="working_format")?IC.play+"YouTube":IC.trend+"Trends";
     foot.appendChild(src);
-    const url=(s.evidence||[]).find(e=>e.startsWith("http"));
+    const url=(s.evidence||[]).find(e=>/^https?:\/\//i.test(e));
     if(url){const a=make("a","sig-link","Watch ↗");a.href=url;a.target="_blank";a.rel="noopener";foot.appendChild(a);}
     body.appendChild(foot);
     card.appendChild(body);
@@ -945,6 +981,76 @@ function openPro(){
   $("#proOverlay").classList.add("open");
 }
 function closePro(){ $("#proOverlay").classList.remove("open"); }
+
+/* ── why this works (deep video analysis) ──────────────────── */
+function closeAna(){ $("#anaOverlay").classList.remove("open"); }
+
+async function openAnalysis(url){
+  const body=$("#anaBody");
+  body.innerHTML=`<div class="ana-loading">Watching the video for you — hook,
+    structure, comments, thumbnail…<br>~15 seconds</div>`;
+  $("#anaOverlay").classList.add("open");
+  try{
+    const r=await fetch(`${API}/api/analyze`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json",
+               ...(token?{"Authorization":"Bearer "+token}:{})},
+      body:JSON.stringify({video:url, niche})});
+    const j=await r.json();
+    if(r.status===403){ closeAna(); openPro(); return; }
+    if(!r.ok){ body.innerHTML=`<div class="ana-loading">${escA(j.error||"Analysis failed — try again.")}</div>`; return; }
+    renderAnalysis(j);
+  }catch(_){
+    body.innerHTML=`<div class="ana-loading">Network hiccup — try again.</div>`;
+  }
+}
+
+function renderAnalysis(j){
+  const a=j.analysis||{}, m=j.meta||{}, body=$("#anaBody");
+  let h=`<div class="ana-verdict">${escA(a.verdict||"")}</div>`;
+  h+=`<div class="ana-why">${escA(m.title||"")} — ${escA(m.channel||"")}
+      · ${Number(m.views||0).toLocaleString()} views
+      · ${Math.round(m.views_per_hour||0).toLocaleString()}/hr</div>`;
+  if(a.hook){
+    h+=`<div class="ana-sec">The hook</div>
+        <div class="ana-quote">“${escA(a.hook.quote||"")}”</div>
+        <div class="ana-why">${escA(a.hook.why||"")}</div>`;
+  }
+  if(Array.isArray(a.structure)&&a.structure.length){
+    h+=`<div class="ana-sec">Beat structure</div><ul class="ana-list">`
+      +a.structure.map(b=>`<li><b>${escA(b.t||"")}</b> — ${escA(b.beat||"")}</li>`).join("")
+      +`</ul>`;
+  }
+  if(a.title_formula){
+    h+=`<div class="ana-sec">Title formula</div>
+        <div class="ana-why"><b>${escA(a.title_formula.pattern||"")}</b><br>
+        ${escA(a.title_formula.why||"")}</div>`;
+  }
+  if(a.thumbnail&&Array.isArray(a.thumbnail.elements)&&a.thumbnail.elements.length){
+    h+=`<div class="ana-sec">Thumbnail</div>
+        <div class="ana-why">${a.thumbnail.elements.map(escA).join(" · ")}<br>
+        ${escA(a.thumbnail.why||"")}</div>`;
+  }
+  if(a.audience&&((a.audience.loved||[]).length||(a.audience.wanted||[]).length)){
+    h+=`<div class="ana-sec">What the audience says</div><ul class="ana-list">`
+      +(a.audience.loved||[]).map(x=>`<li>Loved: ${escA(x)}</li>`).join("")
+      +(a.audience.wanted||[]).map(x=>`<li>Wants next: ${escA(x)}</li>`).join("")
+      +`</ul>`;
+  }
+  if(Array.isArray(a.steal_this)&&a.steal_this.length){
+    h+=`<div class="ana-sec">Make your version</div><ul class="ana-list">`
+      +a.steal_this.map(x=>`<li>${escA(x)}</li>`).join("")+`</ul>`;
+  }
+  const ev=a.evidence||{};
+  h+=`<div class="ana-chips">`
+    +["transcript","comments","thumbnail"].map(k=>
+      `<span class="ana-chip ${ev[k]?"on":"off"}">${k}${ev[k]?" ✓":" —"}</span>`).join("")
+    +`<span class="ana-chip">${escA(a.confidence||"")} confidence</span>`
+    +(/^https?:\/\//i.test(m.url||"")
+        ?`<a class="ana-chip" href="${escA(m.url)}" target="_blank" rel="noopener">watch ↗</a>`:"")
+    +`</div>`;
+  body.innerHTML=h;
+}
 
 /* ── restore access (recover / paste token) ────────────────── */
 function toggleRestore(){
