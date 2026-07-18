@@ -108,8 +108,7 @@ svg{display:block}
 .stat-pill{flex:1;display:flex;flex-direction:column;gap:2px;padding:12px 16px}
 .stat-pill + .stat-pill{border-left:1px solid var(--border)}
 .stat-pill .sv{
-  font-size:22px;font-weight:600;letter-spacing:-.2px;
-  font-variant-numeric:tabular-nums
+  font-size:22px;font-weight:600;letter-spacing:-.2px
 }
 .stat-pill .sl{
   font-size:10.5px;font-weight:500;color:var(--text3);
@@ -157,12 +156,6 @@ svg{display:block}
 @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
 .ctop{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.ring{position:relative;width:48px;height:48px;flex:0 0 auto}
-.ring svg{transform:rotate(-90deg)}
-.ring .rv{
-  position:absolute;inset:0;display:grid;place-items:center;
-  font-size:12px;font-weight:600;font-variant-numeric:tabular-nums
-}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .pill{
   display:inline-flex;align-items:center;gap:5px;
@@ -175,15 +168,53 @@ svg{display:block}
 .pill.fresh{color:var(--accent);border-color:rgba(91,108,255,.35)}
 .pill.persona{color:var(--text2);border-color:var(--border-strong)}
 
-.card-title{font-size:15px;font-weight:600;line-height:1.35;margin:12px 0 6px;letter-spacing:-.1px}
-.evidence{
-  display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);
-  padding:2px 0;margin-bottom:12px;flex-wrap:wrap
+.card-title{font-size:15.5px;font-weight:600;line-height:1.35;margin:12px 0 10px;letter-spacing:-.1px}
+
+/* ── card metrics ────────────────────────────────────────────── */
+/* Velocity is the number that sells the idea, so it is the hero figure:
+   proportional digits (tabular reads loose at display size), unit muted. */
+.metric-row{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.metric-hero{font-size:22px;font-weight:600;letter-spacing:-.5px;line-height:1.05}
+.metric-hero .mu{
+  font-size:12px;font-weight:500;color:var(--text2);margin-left:3px;letter-spacing:0
 }
-.evidence .ic{color:var(--text3)}
-.evidence .ev-stat{font-weight:500;color:var(--text2)}
-.evidence a{color:var(--accent);text-decoration:none;font-size:12px;margin-left:auto;white-space:nowrap}
-.evidence a:hover{color:var(--accent-hover)}
+/* --text3 is 3.85:1 on --surface, under the 4.5:1 floor for small text;
+   anything here carrying real data sits on --text2 (7.26:1) instead. */
+.metric-sub{
+  font-size:11.5px;color:var(--text2);margin-left:auto;text-align:right;
+  line-height:1.4;white-space:nowrap
+}
+/* Momentum meter: length carries the magnitude, so hue stays constant —
+   the accent is reserved to mark the single top pick (emphasis). */
+.meter{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.meter-fill{
+  height:100%;border-radius:2px;background:var(--text3);width:0;
+  transition:width .55s cubic-bezier(.2,.8,.2,1)
+}
+.card.lead{border-color:rgba(91,108,255,.32)}
+.card.lead .meter-fill{background:var(--accent)}
+.meter-cap{
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+  font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.07em;
+  margin:6px 0 12px
+}
+.meter-cap b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+
+/* why_now — the evidence line that makes the idea persuasive */
+.whynow{
+  font-size:12.5px;line-height:1.5;color:var(--text2);
+  padding-left:11px;border-left:1px solid var(--border-strong);margin-bottom:12px
+}
+.whynow .wl{
+  display:block;font-size:10px;font-weight:500;color:var(--text3);
+  text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px
+}
+
+.card-actions{display:flex;align-items:center;gap:14px;margin-top:14px}
+.card-actions a{
+  color:var(--accent);text-decoration:none;font-size:12px;font-weight:500;white-space:nowrap
+}
+.card-actions a:hover{color:var(--accent-hover)}
 
 .hook-box{
   background:var(--surface2);border-left:2px solid var(--accent);border-radius:8px;
@@ -344,8 +375,9 @@ ol.outline li::before{
 .modal-close.ghost:hover{color:var(--text2)}
 /* why-this-works */
 .ana-btn{margin-left:auto;border:1px solid var(--border-strong);background:transparent;
-  color:var(--text2);font:inherit;font-size:11.5px;padding:3px 9px;border-radius:99px;cursor:pointer}
-.ana-btn:hover{color:var(--text);border-color:var(--text3)}
+  color:var(--text2);font:inherit;font-size:11.5px;font-weight:500;padding:4px 11px;
+  border-radius:99px;cursor:pointer;transition:.15s}
+.ana-btn:hover{color:var(--text);border-color:var(--text3);background:var(--surface2)}
 .ana-verdict{font-size:14.5px;font-weight:600;line-height:1.45;margin-bottom:14px}
 .ana-sec{margin:14px 0 4px;font-size:11px;font-weight:600;letter-spacing:.08em;
   text-transform:uppercase;color:var(--text3)}
@@ -722,15 +754,6 @@ function toast(msg, dur=1600, ok=false){
 function copy(txt){
   (navigator.clipboard?.writeText(txt) ?? Promise.reject()).then(()=>toast("Copied to clipboard",1600,true)).catch(()=>toast("Copy failed"));
 }
-function scoreColor(s){ return s>=70?"#3DD68C":s>=40?"#F0B429":"#A0A0A8"; }
-function ring(score){
-  const r=19, C=2*Math.PI*r, off=C*(1-score/100), col=scoreColor(score);
-  return `<div class="ring"><svg width="48" height="48">
-    <circle cx="24" cy="24" r="${r}" stroke="#2E2E33" stroke-width="3" fill="none"/>
-    <circle cx="24" cy="24" r="${r}" stroke="${col}" stroke-width="3" fill="none"
-      stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
-  </svg><div class="rv" style="color:${col}">${Math.round(score)}</div></div>`;
-}
 function emptyBlock(iconSvg, html){
   return make("div","empty",`<div class="eicon">${iconSvg}</div><p>${html}</p>`);
 }
@@ -760,14 +783,40 @@ async function loadNiches(){
 }
 
 /* ── idea card ─────────────────────────────────────────────── */
+/* source_stat arrives as "7.5M views · 7d old · 46,804/hr" (or
+   "~1,000 searches right now" for a search trend). Pull the velocity out as
+   the hero figure and keep the rest as muted context. */
+function heroMetric(stat){
+  const parts=String(stat||"").split("·").map(s=>s.trim()).filter(Boolean);
+  if(!parts.length) return null;
+  const vi=parts.findIndex(p=>/\/\s*hr$/i.test(p));
+  const pick=parts[vi>=0?vi:0];
+  const rest=parts.filter((_,i)=>i!==(vi>=0?vi:0));
+  const m=pick.match(/^([~≈<>]?[\d.,]+\s*[KMB]?)\s*(.*)$/);
+  return {num:m?m[1].trim():pick, unit:m?(m[2]||"").trim():"", rest:rest.join(" · ")};
+}
+
+/* why_now restates source_stat verbatim ("top video at 7.5M views · …"),
+   which is now the hero figure directly above it. Drop the sentence that
+   duplicates it and keep what the metrics don't already say — the
+   topic-wide average, or the "ride it before it peaks" call. */
+function whyNowText(idea){
+  const w=String(idea.why_now||"").trim();
+  const stat=String(idea.source_stat||"").trim();
+  if(!w || !stat) return w;
+  const kept=w.split(". ").filter(s=>!s.includes(stat));
+  if(!kept.length) return w;
+  const out=kept.join(". ").trim();
+  return /[.!?]$/.test(out) ? out : out+".";
+}
+
 function ideaCard(idea, idx){
   const isShort = (idea.format||"").toLowerCase().includes("short");
   const isYT = (idea.kind||"") === "working_format";
-  const card = make("div","card");
+  const card = make("div","card"+(idx===0?" lead":""));
   card.style.animationDelay=(idx*30)+"ms";
 
   const ctop = make("div","ctop");
-  ctop.innerHTML = ring(idea.score);
   const pills = make("div","pills");
   let ph=`<span class="pill rank">${String(idx+1).padStart(2,"0")}</span>`
     +`<span class="pill">${isShort?"Short":"Long-form"}</span>`
@@ -781,21 +830,29 @@ function ideaCard(idea, idx){
 
   card.appendChild(make("div","card-title",escA(idea.titles[0]||"")));
 
-  if(idea.source_stat||idea.source_url){
-    const ev=make("div","evidence");
-    ev.innerHTML=`${IC.bars}<span class="ev-stat">${escA(idea.source_stat||"")}</span>`;
-    if(idea.source_url && /^https?:\/\//i.test(idea.source_url)){
-      const a=make("a",null,"Source ↗");
-      a.href=idea.source_url; a.target="_blank"; a.rel="noopener";
-      ev.appendChild(a);
-      if(/youtu\.?be/.test(idea.source_url)){
-        const b=make("button","ana-btn","Why this works");
-        b.onclick=e=>{e.stopPropagation();openAnalysis(idea.source_url);};
-        ev.appendChild(b);
-      }
-    }
-    card.appendChild(ev);
+  const hm=heroMetric(idea.source_stat);
+  if(hm){
+    const row=make("div","metric-row");
+    row.innerHTML=`<div class="metric-hero">${escA(hm.num)}`
+      +(hm.unit?`<span class="mu">${escA(hm.unit)}</span>`:"")+`</div>`
+      +(hm.rest?`<div class="metric-sub">${escA(hm.rest)}</div>`:"");
+    card.appendChild(row);
   }
+
+  // Momentum meter — the score's meaning, made legible.
+  const score=Math.max(0,Math.min(100,Number(idea.score)||0));
+  const meter=make("div","meter");
+  const fill=make("div","meter-fill");
+  meter.appendChild(fill);
+  card.appendChild(meter);
+  setTimeout(()=>fill.style.width=Math.max(2,score)+"%",60+idx*40);
+  const cap=make("div","meter-cap");
+  cap.innerHTML=`<span>Momentum</span><b>${Math.round(score)}</b>`;
+  card.appendChild(cap);
+
+  const why=whyNowText(idea);
+  if(why) card.appendChild(make("div","whynow",
+    `<span class="wl">Why now</span>${escA(why)}`));
 
   const hbox=make("div","hook-box");
   hbox.innerHTML=`<span class="hl">Hook</span>${escA(idea.hook||"")}`;
@@ -824,6 +881,19 @@ function ideaCard(idea, idx){
 
   d.appendChild(db);
   card.appendChild(d);
+
+  if(idea.source_url && /^https?:\/\//i.test(idea.source_url)){
+    const acts=make("div","card-actions");
+    const a=make("a",null,"Source ↗");
+    a.href=idea.source_url; a.target="_blank"; a.rel="noopener";
+    acts.appendChild(a);
+    if(/youtu\.?be/.test(idea.source_url)){
+      const b=make("button","ana-btn","Why this works");
+      b.onclick=e=>{e.stopPropagation();openAnalysis(idea.source_url);};
+      acts.appendChild(b);
+    }
+    card.appendChild(acts);
+  }
   return card;
 }
 
