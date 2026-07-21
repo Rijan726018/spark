@@ -144,6 +144,35 @@ def test_recency_boost_prefers_fresher_topic():
     assert opps[0].score > opps[1].score
 
 
+def test_recency_weight_decays_with_age():
+    from trend_engine.aggregate import _recency_weight
+    assert _recency_weight(0) == 1.0
+    assert _recency_weight(0) > _recency_weight(48) > _recency_weight(168)
+    assert _recency_weight(48) == 0.7                 # half-life 48h, floor 0.4
+    assert _recency_weight(10_000) >= 0.4             # never below the floor
+
+
+def test_fresh_riser_outranks_bigger_week_old_video():
+    """A video rising today beats a higher-raw-velocity week-old giant — this is
+    the core fix: the feed leads with momentum, not perennial size."""
+    fresh = [_video("Fresh riser", 30000, 24, query="fat loss tips", vid="f")]   # 1,250/hr · 1d
+    giant = [_video("Week-old giant", 240000, 144, query="gym motivation", vid="g")]  # 1,667/hr · 6d
+    opps = build_opportunities([], fresh + giant, FITNESS)
+    assert opps[0].topic == "fat loss tips", "the fresh riser should lead despite lower raw velocity"
+
+
+def test_reference_video_is_the_fresh_riser_not_the_evergreen():
+    """Within one topic, the surfaced reference is the freshest hot video, so the
+    card's stat rotates as new videos appear — killing the 'same for days' feel."""
+    vids = [
+        _video("Evergreen giant", 500000, 150, query="fat loss tips", vid="ever"),  # 3,333/hr · 6.25d
+        _video("Todays riser", 90000, 20, query="fat loss tips", vid="today"),      # 4,500/hr · 20h
+    ]
+    opps = build_opportunities([], vids, FITNESS)
+    assert any("watch?v=today" in e for e in opps[0].evidence)
+    assert opps[0].age_hours == 20
+
+
 def test_idea_carries_source_age():
     vids = [_video("A video", 100000, 30)]
     opps = build_opportunities([], vids, FITNESS)

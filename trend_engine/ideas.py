@@ -209,8 +209,14 @@ def _make_idea(opp: Opportunity, niche: NicheConfig, idx: int) -> Idea:
         stat = opp.evidence[0] if opp.evidence else "rising interest"
         why = f"Spiking in search right now — {stat}. Ride the wave before it peaks."
     else:
-        stat = opp.evidence[0] if opp.evidence else "high view velocity"
-        why = f"This topic is firing in your niche — top video at {stat}."
+        # Lead with recency when the surfaced video is fresh — this is what
+        # makes the card visibly change day to day as new videos catch fire.
+        # Deliberately does NOT repeat source_stat (shown as the hero metric).
+        age_h = opp.age_hours or 0
+        if 0 < age_h <= 48:
+            why = f"Rising right now — the hottest video is only {round(age_h)}h old."
+        else:
+            why = "This format is peaking in your niche right now."
         group = next((e for e in opp.evidence if e.endswith("views/hr")), None)
         if group:
             why += f" Across the topic: {group}."

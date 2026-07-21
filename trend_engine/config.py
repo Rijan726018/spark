@@ -155,7 +155,7 @@ NICHE_PRESETS: dict[str, NicheConfig] = {
 class Settings:
     geo: str = "US"
     youtube_api_key: str = ""
-    youtube_days: int = 7              # only consider videos published in last N days
+    youtube_days: int = 4              # only consider videos from the last N days — tighter = fresher feed
     max_videos_per_query: int = 12
     rss_url_tmpl: str = "https://trends.google.com/trending/rss?geo={geo}"
     out_dir: str = "content_digests"

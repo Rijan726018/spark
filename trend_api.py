@@ -42,7 +42,7 @@ MOBILE = BASE / "mobile"
 # survive redeploys (free-plan serving depends on them).
 CACHE_DIR = Path(os.getenv("SPARK_CACHE_DIR") or BASE / "brief_cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-CACHE_TTL_SECONDS = 6 * 3600          # refresh shared brief at most 4x/day
+CACHE_TTL_SECONDS = 3 * 3600          # refresh shared brief up to ~8x/day (bounded by DAILY_RUN_BUDGET)
 MAX_NICHE_LEN = 60                    # resolve_niche() turns any string into live queries
 
 app = FastAPI(title="Spark API", version="1.0.0")

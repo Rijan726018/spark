@@ -19,6 +19,18 @@ from .models import Opportunity, TrendItem, VideoItem
 
 _WORD = re.compile(r"[a-z0-9']+")
 
+# Recency weight: half-life 48h, floor 0.4. A video rising *today* is worth up
+# to ~2.5x a week-old video at the same raw velocity, so momentum outranks size
+# and the feed reorders daily as new videos catch fire — instead of perennial
+# giants ("what i eat in a day") pinning the top spot for a week straight.
+_RECENCY_HALF_LIFE_H = 48.0
+_RECENCY_FLOOR = 0.4
+
+
+def _recency_weight(age_hours: float) -> float:
+    return _RECENCY_FLOOR + (1.0 - _RECENCY_FLOOR) * (
+        0.5 ** (max(age_hours, 0.0) / _RECENCY_HALF_LIFE_H))
+
 
 def _tokens(text: str) -> set[str]:
     return set(_WORD.findall((text or "").lower()))
@@ -106,20 +118,25 @@ def build_opportunities(trends: list[TrendItem], videos: list[VideoItem],
         if relevance(v.title, niche) >= 0:  # drop hard-excluded
             query_groups[v.query].append(v)
 
-    group_metrics: list[tuple[str, list[VideoItem], float]] = []
+    group_metrics: list[tuple[str, list[VideoItem], float, float]] = []
     for query, group in query_groups.items():
-        group.sort(key=lambda v: v.velocity, reverse=True)
-        avg_vel = sum(v.velocity for v in group) / len(group)
-        # Recency boost: a topic whose hottest video is <48h old is more
-        # actionable than one peaking 6 days ago at the same velocity.
-        freshest = min(v.age_hours for v in group)
-        boost = 1.3 if freshest <= 48 else 1.15 if freshest <= 96 else 1.0
-        group_metrics.append((query, group, avg_vel * boost))
+        # Rank by recency-weighted velocity so a video rising today outranks a
+        # week-old mega-hit at the same raw velocity. Sorting by the weighted
+        # value also makes the surfaced reference video (group[0]) the freshest
+        # riser, not the biggest evergreen — so the card's stat changes daily.
+        group.sort(key=lambda v: v.velocity * _recency_weight(v.age_hours),
+                   reverse=True)
+        weighted = [v.velocity * _recency_weight(v.age_hours) for v in group]
+        # The group's strength is its single hottest fresh video (a breakout
+        # surfaces), lightly blended with the average so a consistently-hot
+        # format isn't penalised for having depth.
+        rank_metric = 0.75 * max(weighted) + 0.25 * (sum(weighted) / len(weighted))
+        avg_vel = sum(v.velocity for v in group) / len(group)   # raw, for display
+        group_metrics.append((query, group, rank_metric, avg_vel))
 
-    vel_scores = _normalize([m for _, _, m in group_metrics])
-    for (query, group, avg_vel), norm in zip(group_metrics, vel_scores):
+    vel_scores = _normalize([m for _, _, m, _ in group_metrics])
+    for (query, group, rank_metric, avg_vel), norm in zip(group_metrics, vel_scores):
         best = group[0]
-        total_views = sum(v.views for v in group)
         age_days = best.age_hours / 24
         age_str = f"{age_days:.0f}d" if age_days >= 1 else f"{best.age_hours:.0f}h"
         ev = [
@@ -132,7 +149,7 @@ def build_opportunities(trends: list[TrendItem], videos: list[VideoItem],
             ev.insert(1, f"{len(group)} videos averaging {avg_vel:,.0f} views/hr")
         opps.append(Opportunity(topic=query, score=norm, kind="working_format",
                                 evidence=ev, raw_metric=avg_vel,
-                                age_hours=min(v.age_hours for v in group)))
+                                age_hours=best.age_hours))
 
     opps.sort(key=lambda o: o.score, reverse=True)
     return _dedupe(opps)
