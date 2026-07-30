@@ -118,6 +118,24 @@ def build_opportunities(trends: list[TrendItem], videos: list[VideoItem],
         if relevance(v.title, niche) >= 0:  # drop hard-excluded
             query_groups[v.query].append(v)
 
+    # Outlier multiplier: a video beating its own channel's normal is a format
+    # signal, not just a big-channel artifact. Bounded so one freak 50x video
+    # can't dominate the whole feed, and neutral (1.0) when unknown.
+    def _outlier_mult(group: list[VideoItem]) -> float:
+        scores = [v.outlier for v in group if v.outlier]
+        if not scores:
+            return 1.0
+        best = max(scores)
+        if best >= 10:
+            return 1.5
+        if best >= 5:
+            return 1.35
+        if best >= 2:
+            return 1.2
+        if best < 0.5:      # underperforming its own channel — weak signal
+            return 0.85
+        return 1.0
+
     group_metrics: list[tuple[str, list[VideoItem], float, float]] = []
     for query, group in query_groups.items():
         # Rank by recency-weighted velocity so a video rising today outranks a
@@ -131,6 +149,7 @@ def build_opportunities(trends: list[TrendItem], videos: list[VideoItem],
         # surfaces), lightly blended with the average so a consistently-hot
         # format isn't penalised for having depth.
         rank_metric = 0.75 * max(weighted) + 0.25 * (sum(weighted) / len(weighted))
+        rank_metric *= _outlier_mult(group)
         avg_vel = sum(v.velocity for v in group) / len(group)   # raw, for display
         group_metrics.append((query, group, rank_metric, avg_vel))
 
@@ -147,9 +166,13 @@ def build_opportunities(trends: list[TrendItem], videos: list[VideoItem],
         ]
         if len(group) > 1:
             ev.insert(1, f"{len(group)} videos averaging {avg_vel:,.0f} views/hr")
+        if best.outlier and best.outlier >= 1.5:
+            ev.insert(1, f"{best.outlier:.1f}x that channel's normal views")
         opps.append(Opportunity(topic=query, score=norm, kind="working_format",
                                 evidence=ev, raw_metric=avg_vel,
-                                age_hours=best.age_hours))
+                                age_hours=best.age_hours,
+                                outlier=best.outlier,
+                                measured=best.measured_velocity is not None))
 
     opps.sort(key=lambda o: o.score, reverse=True)
     return _dedupe(opps)

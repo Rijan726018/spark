@@ -27,10 +27,23 @@ class VideoItem:
     query: str          # the niche query that surfaced it
     url: str = ""
     source: str = "youtube"
+    channel_id: str = ""
+    # Set from snapshot history when available (views/hr measured between two
+    # observations); falls back to the lifetime average on first sighting.
+    measured_velocity: float | None = None
+    # views ÷ the channel's median recent views. >1 means this video is beating
+    # its own channel's normal — the real "this format is winning" signal.
+    outlier: float | None = None
 
     @property
     def velocity(self) -> float:
-        """Views per hour since publish — the core momentum signal."""
+        """Views per hour — measured when we have history, else lifetime average."""
+        if self.measured_velocity is not None:
+            return self.measured_velocity
+        return self.views / max(self.age_hours, 1.0)
+
+    @property
+    def lifetime_velocity(self) -> float:
         return self.views / max(self.age_hours, 1.0)
 
     def to_dict(self) -> dict:
@@ -48,6 +61,8 @@ class Opportunity:
     evidence: list[str] = field(default_factory=list)
     raw_metric: float = 0.0       # traffic or avg-velocity, pre-normalisation
     age_hours: float = 0.0        # age of the freshest supporting signal
+    outlier: float | None = None  # best supporting video's views ÷ channel median
+    measured: bool = False        # True when velocity came from snapshot history
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -69,6 +84,8 @@ class Idea:
     source_url: str = ""          # YouTube URL of the best reference video
     source_stat: str = ""         # human-readable stat, e.g. "12.7M views · 152h"
     source_age_hours: float = 0.0 # age of the freshest supporting signal
+    outlier: float | None = None  # e.g. 14.2 → "14x this channel's normal"
+    measured: bool = False        # velocity is snapshot-measured, not estimated
 
     def to_dict(self) -> dict:
         d = asdict(self)

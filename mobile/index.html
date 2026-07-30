@@ -166,6 +166,9 @@ svg{display:block}
 .pill.rank{color:var(--accent);border-color:rgba(91,108,255,.35);font-variant-numeric:tabular-nums}
 .pill.yt,.pill.trend{border-color:transparent;color:var(--text3);padding-left:0}
 .pill.fresh{color:var(--accent);border-color:rgba(91,108,255,.35)}
+/* Outlier: the format-is-winning signal. Green because it reads as "good
+   news you can act on", and it earns the loudest pill in the row. */
+.pill.out{color:var(--success);border-color:rgba(61,214,140,.4);font-weight:600}
 .pill.persona{color:var(--text2);border-color:var(--border-strong)}
 
 .card-title{font-size:15.5px;font-weight:600;line-height:1.35;margin:12px 0 10px;letter-spacing:-.1px}
@@ -823,6 +826,7 @@ function ideaCard(idea, idx){
     +`<span class="pill ${isYT?"yt":"trend"}">${isYT?IC.play+"YouTube":IC.trend+"Trending"}</span>`;
   const age = idea.source_age_hours||0;
   if(!isYT || age<=48) ph+=`<span class="pill fresh">New</span>`;
+  if(idea.outlier>=1.5) ph+=`<span class="pill out">${idea.outlier.toFixed(1)}x normal</span>`;
   if(lastResult?.personalized) ph+=`<span class="pill persona">Personalized</span>`;
   pills.innerHTML=ph;
   ctop.appendChild(pills);

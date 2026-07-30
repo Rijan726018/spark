@@ -79,6 +79,7 @@ def search_videos(query: str, api_key: str, days: int = 7, max_results: int = 12
             video_id=vid,
             title=snip.get("title", "").strip(),
             channel=snip.get("channelTitle", "").strip(),
+            channel_id=snip.get("channelId", "").strip(),
             views=int(stats.get("viewCount", 0) or 0),
             age_hours=_age_hours(snip.get("publishedAt", "")),
             query=query,

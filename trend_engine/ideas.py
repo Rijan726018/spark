@@ -213,7 +213,13 @@ def _make_idea(opp: Opportunity, niche: NicheConfig, idx: int) -> Idea:
         # makes the card visibly change day to day as new videos catch fire.
         # Deliberately does NOT repeat source_stat (shown as the hero metric).
         age_h = opp.age_hours or 0
-        if 0 < age_h <= 48:
+        if opp.outlier and opp.outlier >= 2:
+            # The strongest possible "why": a video beating its own channel's
+            # normal proves the FORMAT is working, not just the channel's size.
+            why = (f"A video here is doing {opp.outlier:.1f}x its channel's "
+                   "normal views — that's the format winning, not just a big "
+                   "channel posting.")
+        elif 0 < age_h <= 48:
             why = f"Rising right now — the hottest video is only {round(age_h)}h old."
         else:
             why = "This format is peaking in your niche right now."
@@ -235,6 +241,8 @@ def _make_idea(opp: Opportunity, niche: NicheConfig, idx: int) -> Idea:
         source_url=url,
         source_stat=source_stat,
         source_age_hours=opp.age_hours,
+        outlier=opp.outlier,
+        measured=opp.measured,
     )
 
 

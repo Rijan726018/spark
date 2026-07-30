@@ -31,6 +31,7 @@ import spark_analyze
 import spark_billing as billing
 import spark_email
 import spark_expand
+import spark_metrics
 import spark_store
 from trend_engine.config import NICHE_PRESETS, Settings
 from trend_engine.llm import llm_provider
@@ -279,7 +280,9 @@ def _run_brief(niche: str, top: int, profile: dict | None, use_llm: bool,
     settings = Settings.from_env()
     if geo:
         settings.geo = geo
-    result = run(niche, settings=settings, top=top, use_llm=use_llm, profile=profile)
+    metrics = spark_metrics.MetricsProvider(api_key=settings.youtube_api_key)
+    result = run(niche, settings=settings, top=top, use_llm=use_llm,
+                 profile=profile, metrics=metrics)
     return {
         "niche": result["niche"],
         "date": result["date"],
