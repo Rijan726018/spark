@@ -122,6 +122,9 @@ def build_opportunities(trends: list[TrendItem], videos: list[VideoItem],
     # signal, not just a big-channel artifact. Bounded so one freak 50x video
     # can't dominate the whole feed, and neutral (1.0) when unknown.
     def _outlier_mult(group: list[VideoItem]) -> float:
+        # Boost only, never penalise: a missing or low outlier usually means
+        # thin data (no same-format history, small sample), not a weak topic,
+        # and penalising on sparsity would bury real signals.
         scores = [v.outlier for v in group if v.outlier]
         if not scores:
             return 1.0
@@ -132,8 +135,21 @@ def build_opportunities(trends: list[TrendItem], videos: list[VideoItem],
             return 1.35
         if best >= 2:
             return 1.2
-        if best < 0.5:      # underperforming its own channel — weak signal
-            return 0.85
+        return 1.0
+
+    def _accel_mult(group: list[VideoItem]) -> float:
+        """Snapshot-measured acceleration. Dimensionless (measured ÷ lifetime
+        rate), so it IS comparable between videos — unlike the raw rates."""
+        accels = [v.acceleration for v in group if v.acceleration is not None]
+        if not accels:
+            return 1.0
+        best = max(accels)
+        if best >= 3:
+            return 1.3      # gaining 3x faster than its own average — spiking
+        if best >= 1.5:
+            return 1.15
+        if best <= 0.3:
+            return 0.9      # measured and clearly cooling off
         return 1.0
 
     group_metrics: list[tuple[str, list[VideoItem], float, float]] = []
@@ -149,7 +165,7 @@ def build_opportunities(trends: list[TrendItem], videos: list[VideoItem],
         # surfaces), lightly blended with the average so a consistently-hot
         # format isn't penalised for having depth.
         rank_metric = 0.75 * max(weighted) + 0.25 * (sum(weighted) / len(weighted))
-        rank_metric *= _outlier_mult(group)
+        rank_metric *= _outlier_mult(group) * _accel_mult(group)
         avg_vel = sum(v.velocity for v in group) / len(group)   # raw, for display
         group_metrics.append((query, group, rank_metric, avg_vel))
 

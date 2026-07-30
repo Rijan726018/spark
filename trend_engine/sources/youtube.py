@@ -10,6 +10,7 @@ rest of the pipeline (Google Trends) still produces a digest.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -23,6 +24,16 @@ VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 def _scrub(err: Exception, api_key: str) -> str:
     """Error messages can embed the request URL — never log the API key."""
     return str(err).replace(api_key, "***") if api_key else str(err)
+
+
+def _duration_seconds(iso: str) -> int:
+    """ISO-8601 duration → seconds. Used to tell Shorts from long-form."""
+    m = re.match(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$",
+                 (iso or "").strip())
+    if not m:
+        return 0
+    d, h, mi, s = (int(g or 0) for g in m.groups())
+    return d * 86400 + h * 3600 + mi * 60 + s
 
 
 def _age_hours(published_iso: str) -> float:
@@ -62,7 +73,8 @@ def search_videos(query: str, api_key: str, days: int = 7, max_results: int = 12
 
     try:
         v = requests.get(VIDEOS_URL, params={
-            "key": api_key, "id": ",".join(ids), "part": "snippet,statistics",
+            "key": api_key, "id": ",".join(ids),
+            "part": "snippet,statistics,contentDetails",   # same 1 quota unit
         }, timeout=timeout)
         v.raise_for_status()
         details = v.json()
@@ -75,6 +87,7 @@ def search_videos(query: str, api_key: str, days: int = 7, max_results: int = 12
         snip = it.get("snippet", {})
         stats = it.get("statistics", {})
         vid = it.get("id", "")
+        dur = _duration_seconds((it.get("contentDetails", {}) or {}).get("duration", ""))
         out.append(VideoItem(
             video_id=vid,
             title=snip.get("title", "").strip(),
@@ -82,6 +95,7 @@ def search_videos(query: str, api_key: str, days: int = 7, max_results: int = 12
             channel_id=snip.get("channelId", "").strip(),
             views=int(stats.get("viewCount", 0) or 0),
             age_hours=_age_hours(snip.get("publishedAt", "")),
+            duration_s=dur,
             query=query,
             url=f"https://www.youtube.com/watch?v={vid}",
         ))

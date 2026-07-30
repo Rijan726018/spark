@@ -20,10 +20,10 @@ def temp_db(tmp_path, monkeypatch):
 
 
 def _v(vid="abc", views=10000, age=24.0, query="fat loss tips", ch="ch1",
-       outlier=None, measured=None):
+       outlier=None, measured=None, dur=600):
     return VideoItem(video_id=vid, title="A video", channel="Chan",
                      channel_id=ch, views=views, age_hours=age, query=query,
-                     url=f"https://youtube.com/watch?v={vid}",
+                     url=f"https://youtube.com/watch?v={vid}", duration_s=dur,
                      outlier=outlier, measured_velocity=measured)
 
 
@@ -50,6 +50,25 @@ def test_snapshot_too_recent_is_ignored():
     assert m.measured_velocity("abc", 5000) is None, "gap under 30min is noise"
 
 
+def test_zero_delta_over_short_window_is_no_reading_not_zero(monkeypatch):
+    """YouTube's public viewCount moves in coarse steps. A flat 35-minute
+    window means 'no reading yet' — reporting 0.0 would bury a real riser."""
+    real = time.time
+    monkeypatch.setattr(m.time, "time", lambda: real() - 0.6 * 3600)
+    m.record_snapshots([_v(views=40000)])
+    monkeypatch.setattr(m.time, "time", real)
+    assert m.measured_velocity("abc", 40000) is None
+
+
+def test_zero_delta_over_long_window_is_a_real_zero(monkeypatch):
+    """Flat for 6 hours genuinely means stalled — that IS a measurement."""
+    real = time.time
+    monkeypatch.setattr(m.time, "time", lambda: real() - 6 * 3600)
+    m.record_snapshots([_v(views=40000)])
+    monkeypatch.setattr(m.time, "time", real)
+    assert m.measured_velocity("abc", 40000) == 0.0
+
+
 def test_snapshot_too_old_is_ignored(monkeypatch):
     real = time.time
     monkeypatch.setattr(m.time, "time", lambda: real() - 200 * 3600)
@@ -71,57 +90,115 @@ def test_record_snapshots_is_resilient():
     assert m.record_snapshots([_v(vid="")]) == 0        # no id → skipped
 
 
-def test_video_velocity_prefers_measured_over_lifetime():
+def test_ranking_velocity_is_always_lifetime_basis():
+    """Ranking compares videos against each other, so every video must be on
+    the same basis. The measured rate is exposed separately for display."""
     v = _v(views=100000, age=100.0)                    # lifetime = 1000/hr
     assert v.velocity == pytest.approx(1000, rel=.01)
     v.measured_velocity = 5000.0
-    assert v.velocity == 5000.0                        # measured wins
-    assert v.lifetime_velocity == pytest.approx(1000, rel=.01)
+    assert v.velocity == pytest.approx(1000, rel=.01), "ranking basis unchanged"
+    assert v.current_velocity == 5000.0                # display shows measured
+    assert v.acceleration == pytest.approx(5.0, rel=.01)
 
 
-# ── outlier score ─────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("views,median,expected", [
-    (100000, 10000.0, 10.0),
-    (5000, 10000.0, 0.5),
-    (100000, 0.0, None),
-    (100000, None, None),
-])
-def test_outlier_score(views, median, expected):
-    assert m.outlier_score(views, median) == expected
+def test_acceleration_is_none_without_measurement():
+    assert _v().acceleration is None
 
 
-def test_channel_medians_uses_cache_and_skips_api(monkeypatch):
-    """A cached median must not spend quota."""
+# ── outlier score (rate-vs-rate, format-bucketed) ─────────────────────────────
+
+def _rates(short=None, long=None):
+    out = {}
+    if short:
+        out["short"] = short
+    if long:
+        out["long"] = long
+    return out
+
+
+def test_outlier_compares_rate_against_same_format_rate():
+    # 5,000 views/hr against a channel whose long-form median is 500/hr.
+    assert m.outlier_score(5000.0, _rates(long=(500.0, 15)), is_short=False) == 10.0
+
+
+def test_outlier_none_when_no_same_format_history():
+    """A Shorts-only channel gives no basis for judging a long-form video."""
+    assert m.outlier_score(5000.0, _rates(short=(900.0, 15)), is_short=False) is None
+
+
+def test_outlier_none_on_thin_sample():
+    assert m.outlier_score(5000.0, _rates(long=(500.0, 3)), is_short=False) is None
+
+
+def test_outlier_shrinks_toward_one_on_small_sample():
+    """A 7-upload channel can't mint a 10x claim off noise."""
+    full = m.outlier_score(5000.0, _rates(long=(500.0, 15)), is_short=False)
+    thin = m.outlier_score(5000.0, _rates(long=(500.0, 7)), is_short=False)
+    assert full == 10.0
+    assert 1.0 < thin < full, f"expected shrinkage toward 1.0, got {thin}"
+
+
+def test_outlier_none_without_rates():
+    assert m.outlier_score(5000.0, None, is_short=False) is None
+    assert m.outlier_score(0.0, _rates(long=(500.0, 15)), is_short=False) is None
+
+
+def test_fresh_video_is_not_penalised_for_being_young():
+    """The bug this rewrite fixes: a 6h-old breakout used to be compared
+    against fully matured uploads and scored as an underperformer."""
+    fresh = _v(vid="f", views=12000, age=6.0)          # 2,000 views/hr
+    rates = _rates(long=(400.0, 15))                   # channel normal: 400/hr
+    score = m.outlier_score(fresh.lifetime_velocity, rates, is_short=False)
+    assert score == pytest.approx(5.0, rel=.01), "young breakout must score high"
+
+
+def test_channel_rates_uses_cache_and_skips_api(monkeypatch):
+    """A cached entry must not spend quota."""
     conn = m._db()
-    conn.execute("INSERT INTO channels (channel_id, median_views, sample_n, refreshed) "
-                 "VALUES (?,?,?,?)", ("ch1", 4000.0, 15, time.time()))
+    conn.execute("INSERT INTO channel_rates (channel_id, median_vel_short, n_short, "
+                 "median_vel_long, n_long, refreshed) VALUES (?,?,?,?,?,?)",
+                 ("ch1", 0.0, 0, 400.0, 15, time.time()))
     conn.commit(); conn.close()
 
     def boom(*a, **k):
         raise AssertionError("must not hit the API when cached")
 
-    monkeypatch.setattr(m, "_fetch_channel_median", boom)
-    assert m.channel_medians(["ch1"], "key") == {"ch1": 4000.0}
+    monkeypatch.setattr(m, "_fetch_channel_rates", boom)
+    assert m.channel_rates(["ch1"], "key") == {"ch1": {"long": (400.0, 15)}}
 
 
-def test_channel_medians_respects_fetch_cap(monkeypatch):
+def test_channel_rates_respects_fetch_cap(monkeypatch):
     calls = {"n": 0}
 
     def fake(cid, key):
         calls["n"] += 1
-        return (1000.0, 15)
+        return {"long": (1000.0, 15)}
 
-    monkeypatch.setattr(m, "_fetch_channel_median", fake)
-    got = m.channel_medians([f"c{i}" for i in range(10)], "key", max_fetches=3)
-    assert calls["n"] == 3, "quota cap must bound fetches per run"
+    monkeypatch.setattr(m, "_fetch_channel_rates", fake)
+    got = m.channel_rates([f"c{i}" for i in range(10)], "key", max_fetches=3)
+    assert calls["n"] == 3, "quota AND latency cap must bound fetches per run"
     assert len(got) == 3
 
 
-def test_channel_medians_without_key_returns_only_cached(monkeypatch):
-    monkeypatch.setattr(m, "_fetch_channel_median",
+def test_channel_rates_stops_immediately_on_quota_exhaustion(monkeypatch):
+    """One quotaExceeded means every remaining call fails too — stop, don't
+    burn 100+ round trips inside a request handler."""
+    calls = {"n": 0}
+
+    def fake(cid, key):
+        calls["n"] += 1
+        raise m.QuotaExhausted("quotaExceeded")
+
+    monkeypatch.setattr(m, "_fetch_channel_rates", fake)
+    got = m.channel_rates([f"c{i}" for i in range(20)], "key")
+    assert calls["n"] == 1, "must break out after the first quota error"
+    assert got == {}
+
+
+def test_channel_rates_without_key_returns_only_cached(monkeypatch):
+    monkeypatch.setattr(m, "_fetch_channel_rates",
                         lambda c, k: (_ for _ in ()).throw(AssertionError("no key!")))
-    assert m.channel_medians(["ch1", "ch2"], "") == {}
+    assert m.channel_rates(["ch1", "ch2"], "") == {}
 
 
 def test_provider_disabled_is_inert():
@@ -144,11 +221,24 @@ def test_outlier_boosts_ranking_over_raw_velocity():
     assert opps[0].outlier == 12.0
 
 
-def test_underperforming_video_is_penalised():
-    weak = [_v(vid="w", views=24000, age=24, query="fat loss tips", outlier=0.2)]
-    fine = [_v(vid="f", views=22000, age=24, query="gym motivation", outlier=1.0)]
-    opps = build_opportunities([], weak + fine, FITNESS)
-    assert opps[0].topic == "gym motivation", "sub-0.5x outlier should be discounted"
+def test_low_outlier_is_not_penalised():
+    """A low/absent outlier usually means thin data, not a weak topic —
+    penalising on sparsity buried real signals."""
+    strong_vel = [_v(vid="w", views=48000, age=24, query="fat loss tips", outlier=0.2)]
+    weak_vel = [_v(vid="f", views=22000, age=24, query="gym motivation", outlier=1.0)]
+    opps = build_opportunities([], strong_vel + weak_vel, FITNESS)
+    assert opps[0].topic == "fat loss tips", "velocity should still win"
+
+
+def test_acceleration_boosts_a_spiking_topic():
+    """Measured acceleration is dimensionless, so it IS comparable between
+    videos — a topic gaining 4x its own average rate outranks a steady one."""
+    spiking = [_v(vid="s", views=24000, age=24, query="fat loss tips",
+                  measured=4000.0)]          # lifetime 1,000/hr, now 4,000/hr
+    steady = [_v(vid="t", views=26000, age=24, query="gym motivation",
+                 measured=1050.0)]           # lifetime ~1,083/hr, flat
+    opps = build_opportunities([], spiking + steady, FITNESS)
+    assert opps[0].topic == "fat loss tips"
 
 
 def test_outlier_appears_in_evidence_and_why_now():

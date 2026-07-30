@@ -28,23 +28,40 @@ class VideoItem:
     url: str = ""
     source: str = "youtube"
     channel_id: str = ""
-    # Set from snapshot history when available (views/hr measured between two
-    # observations); falls back to the lifetime average on first sighting.
+    duration_s: int = 0
+    # Views/hr measured between two snapshots — the "rising right now" number.
+    # Only ever compared against the SAME video's lifetime rate, never against
+    # another video's, because the two are different quantities.
     measured_velocity: float | None = None
-    # views ÷ the channel's median recent views. >1 means this video is beating
-    # its own channel's normal — the real "this format is winning" signal.
+    # This video's views/hr ÷ its channel's median views/hr for the same
+    # format. >1 means it is beating its own channel's normal — the real
+    # "this format is winning" signal, independent of channel size.
     outlier: float | None = None
 
     @property
     def velocity(self) -> float:
-        """Views per hour — measured when we have history, else lifetime average."""
-        if self.measured_velocity is not None:
-            return self.measured_velocity
+        """Lifetime views/hour. Deliberately NOT the measured rate: ranking
+        compares videos against each other, so every video must be measured on
+        the same basis or first-sighted videos would outrank observed ones."""
         return self.views / max(self.age_hours, 1.0)
 
+    # Kept as an explicit alias so callers reading ranking code see the basis.
+    lifetime_velocity = velocity
+
     @property
-    def lifetime_velocity(self) -> float:
-        return self.views / max(self.age_hours, 1.0)
+    def current_velocity(self) -> float:
+        """Best available views/hr for DISPLAY — measured when we have it."""
+        return (self.measured_velocity if self.measured_velocity is not None
+                else self.velocity)
+
+    @property
+    def acceleration(self) -> float | None:
+        """measured ÷ lifetime rate. >1 means it is speeding up right now.
+        Dimensionless, so it IS comparable between videos."""
+        if self.measured_velocity is None:
+            return None
+        base = self.velocity
+        return (self.measured_velocity / base) if base > 0 else None
 
     def to_dict(self) -> dict:
         d = asdict(self)

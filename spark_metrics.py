@@ -18,17 +18,30 @@ channel medians cost 3 units per channel and are cached for a week.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import statistics
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 
+
+def _parse_duration(iso: str) -> int:
+    """ISO-8601 duration → seconds (handles the day component and 'P0D')."""
+    m = re.match(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$",
+                 (iso or "").strip())
+    if not m:
+        return 0
+    d, h, mi, s = (int(g or 0) for g in m.groups())
+    return d * 86400 + h * 3600 + mi * 60 + s
+
 _DB_PATH = Path(__file__).parent / "spark_users.db"
 
 _YT = "https://www.googleapis.com/youtube/v3"
-_TIMEOUT = 10
+_TIMEOUT = 5          # these are extra calls inside a request handler — fail fast
+_SESSION = requests.Session()   # connection reuse: 3 calls per channel, up to 40
 
 # A snapshot pair must straddle this gap for a velocity reading to be stable —
 # closer together and rounding noise in viewCount dominates the delta.
@@ -41,6 +54,13 @@ SNAPSHOT_RETENTION_DAYS = 21
 CHANNEL_TTL_S = 7 * 86400
 MEDIAN_SAMPLE = 15          # last N uploads define "normal" for a channel
 MAX_SNAPSHOT_ROWS = 400_000
+# A median over fewer than this many uploads is noise, not "normal".
+MIN_SAMPLE_N = 5
+# Below this the score is shrunk toward 1.0 rather than trusted outright.
+TRUSTED_SAMPLE_N = 10
+# Shorts accumulate views far faster than long-form, so they are never
+# compared against each other — bucketed by this duration boundary.
+SHORT_MAX_S = 60
 
 
 def _db() -> sqlite3.Connection:
@@ -56,11 +76,12 @@ def _db() -> sqlite3.Connection:
             PRIMARY KEY (video_id, at)
         );
         CREATE INDEX IF NOT EXISTS idx_snapshots_at ON snapshots(at);
-        CREATE TABLE IF NOT EXISTS channels (
+        CREATE TABLE IF NOT EXISTS channel_rates (
             channel_id TEXT PRIMARY KEY,
-            title TEXT NOT NULL DEFAULT '',
-            median_views REAL NOT NULL DEFAULT 0,
-            sample_n INTEGER NOT NULL DEFAULT 0,
+            median_vel_short REAL NOT NULL DEFAULT 0,
+            n_short INTEGER NOT NULL DEFAULT 0,
+            median_vel_long REAL NOT NULL DEFAULT 0,
+            n_long INTEGER NOT NULL DEFAULT 0,
             refreshed REAL NOT NULL DEFAULT 0
         );
     """)
@@ -132,23 +153,59 @@ def measured_velocity(video_id: str, current_views: int) -> float | None:
     delta = int(current_views) - int(row["views"])
     if delta < 0:          # view counts can be revised down; not a signal
         return None
+    if delta == 0 and hours < 2:
+        # YouTube's public viewCount advances in coarse, cached steps, so a
+        # zero delta over a short window means "no reading yet", NOT "this
+        # video is dead". Reporting 0.0 would bury a genuine riser.
+        return None
     return delta / hours
 
 
 # ── channel medians → outlier score ───────────────────────────────────────────
 
-def _fetch_channel_median(channel_id: str, api_key: str) -> tuple[float, int] | None:
-    """(median_views, sample_n) over the channel's last MEDIAN_SAMPLE uploads.
+class QuotaExhausted(Exception):
+    """The API key is out of quota — stop making calls for this run."""
+
+
+def _age_hours(published_iso: str) -> float:
+    try:
+        pub = datetime.fromisoformat((published_iso or "").replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    return max((datetime.now(timezone.utc) - pub).total_seconds() / 3600.0, 1.0)
+
+
+def _get(path: str, params: dict, api_key: str) -> dict:
+    r = _SESSION.get(f"{_YT}/{path}", params=params, timeout=_TIMEOUT)
+    if r.status_code == 403:
+        reason = ""
+        try:
+            reason = ((r.json().get("error", {}).get("errors") or [{}])[0]
+                      .get("reason", ""))
+        except ValueError:
+            pass
+        if "quota" in reason.lower():
+            raise QuotaExhausted(reason)
+    r.raise_for_status()
+    return r.json()
+
+
+def _fetch_channel_rates(channel_id: str, api_key: str) -> dict | None:
+    """Median views-per-hour of the channel's recent uploads, split by format.
+
+    Returns {"short": (median_vel, n), "long": (median_vel, n)}.
+
+    Velocity — not raw views — because the videos we score are hours old while
+    a channel's back catalogue is fully matured; comparing raw counts would
+    make every fresh video look like an underperformer. Bucketed by duration
+    because Shorts and long-form accumulate views at completely different rates.
 
     3 quota units: channels.list → uploads playlist, playlistItems.list → ids,
-    videos.list → their view counts.
+    videos.list → stats + duration + publish time.
     """
     try:
-        c = requests.get(f"{_YT}/channels", params={
-            "key": api_key, "id": channel_id, "part": "contentDetails"},
-            timeout=_TIMEOUT)
-        c.raise_for_status()
-        items = c.json().get("items") or []
+        items = _get("channels", {"key": api_key, "id": channel_id,
+                                  "part": "contentDetails"}, api_key).get("items") or []
         if not items:
             return None
         uploads = (items[0].get("contentDetails", {})
@@ -156,43 +213,58 @@ def _fetch_channel_median(channel_id: str, api_key: str) -> tuple[float, int] | 
         if not uploads:
             return None
 
-        p = requests.get(f"{_YT}/playlistItems", params={
+        pl = _get("playlistItems", {
             "key": api_key, "playlistId": uploads, "part": "contentDetails",
-            "maxResults": MEDIAN_SAMPLE}, timeout=_TIMEOUT)
-        p.raise_for_status()
+            "maxResults": MEDIAN_SAMPLE}, api_key)
         ids = [it.get("contentDetails", {}).get("videoId")
-               for it in (p.json().get("items") or [])]
+               for it in (pl.get("items") or [])]
         ids = [i for i in ids if i]
         if not ids:
             return None
 
-        v = requests.get(f"{_YT}/videos", params={
-            "key": api_key, "id": ",".join(ids), "part": "statistics"},
-            timeout=_TIMEOUT)
-        v.raise_for_status()
-        views = [int((it.get("statistics", {}) or {}).get("viewCount", 0) or 0)
-                 for it in (v.json().get("items") or [])]
-        views = [n for n in views if n > 0]
-        if len(views) < 3:     # too thin to call anything "normal"
-            return None
-        return float(statistics.median(views)), len(views)
+        vids = _get("videos", {
+            "key": api_key, "id": ",".join(ids),
+            "part": "statistics,contentDetails,snippet"}, api_key)
+
+        short: list[float] = []
+        long_: list[float] = []
+        for it in (vids.get("items") or []):
+            views = int((it.get("statistics", {}) or {}).get("viewCount", 0) or 0)
+            if views <= 0:
+                continue
+            age = _age_hours((it.get("snippet", {}) or {}).get("publishedAt", ""))
+            if age <= 0:
+                continue
+            dur = _parse_duration((it.get("contentDetails", {}) or {})
+                                  .get("duration", ""))
+            (short if 0 < dur <= SHORT_MAX_S else long_).append(views / age)
+
+        out: dict = {}
+        if short:
+            out["short"] = (float(statistics.median(short)), len(short))
+        if long_:
+            out["long"] = (float(statistics.median(long_)), len(long_))
+        return out or None
+    except QuotaExhausted:
+        raise
     except (requests.RequestException, ValueError, KeyError, TypeError,
             statistics.StatisticsError):
         return None
 
 
-def channel_medians(channel_ids: list[str], api_key: str,
-                    max_fetches: int = 40) -> dict[str, float]:
-    """Median recent views per channel, cached for a week.
+def channel_rates(channel_ids: list[str], api_key: str,
+                  max_fetches: int = 40) -> dict[str, dict]:
+    """Per-channel median upload velocity by format, cached for a week.
 
-    max_fetches bounds quota spend per brief run (3 units each); channels that
-    miss the cutoff simply have no outlier score this run and get picked up on
-    a later run.
+    Returns {channel_id: {"short": (vel, n), "long": (vel, n)}}. max_fetches
+    bounds quota AND latency per run (3 calls each); channels past the cutoff
+    simply have no outlier score this run and get picked up on a later one.
+    A jittered TTL keeps a whole cohort of channels from expiring together.
     """
     wanted = [c for c in dict.fromkeys(channel_ids) if c]
     if not wanted:
         return {}
-    out: dict[str, float] = {}
+    out: dict[str, dict] = {}
     stale: list[str] = []
     now = time.time()
     try:
@@ -200,15 +272,24 @@ def channel_medians(channel_ids: list[str], api_key: str,
         try:
             marks = ",".join("?" * len(wanted))
             rows = conn.execute(
-                f"SELECT channel_id, median_views, refreshed FROM channels "
-                f"WHERE channel_id IN ({marks})", wanted).fetchall()
+                f"SELECT * FROM channel_rates WHERE channel_id IN ({marks})",
+                wanted).fetchall()
             cached = {r["channel_id"]: r for r in rows}
             for cid in wanted:
                 r = cached.get(cid)
-                if r and now - r["refreshed"] < CHANNEL_TTL_S and r["median_views"] > 0:
-                    out[cid] = r["median_views"]
-                else:
-                    stale.append(cid)
+                # Jitter (±12.5%) derived from the id so refreshes spread out
+                # instead of stampeding on the same day every week.
+                ttl = CHANNEL_TTL_S * (0.875 + 0.25 * ((hash(cid) % 1000) / 1000.0))
+                if r and now - r["refreshed"] < ttl:
+                    got = {}
+                    if r["median_vel_short"] > 0:
+                        got["short"] = (r["median_vel_short"], r["n_short"])
+                    if r["median_vel_long"] > 0:
+                        got["long"] = (r["median_vel_long"], r["n_long"])
+                    if got:
+                        out[cid] = got
+                        continue
+                stale.append(cid)
         finally:
             conn.close()
     except sqlite3.Error:
@@ -217,23 +298,32 @@ def channel_medians(channel_ids: list[str], api_key: str,
     if not api_key or not stale:
         return out
 
-    fetched: list[tuple[str, float, int, float]] = []
+    fetched = []
     for cid in stale[:max_fetches]:
-        got = _fetch_channel_median(cid, api_key)
+        try:
+            got = _fetch_channel_rates(cid, api_key)
+        except QuotaExhausted as e:
+            # Every remaining call would fail the same way — stop burning
+            # latency, and make it visible instead of silently degrading.
+            print(f"[metrics] YouTube quota exhausted ({e}) — "
+                  f"skipping {len(stale) - len(fetched)} channel lookups")
+            break
         if got:
-            median, n = got
-            out[cid] = median
-            fetched.append((cid, median, n, now))
+            out[cid] = got
+            s = got.get("short", (0.0, 0))
+            l = got.get("long", (0.0, 0))
+            fetched.append((cid, s[0], s[1], l[0], l[1], now))
     if fetched:
         try:
             conn = _db()
             try:
                 conn.executemany(
-                    "INSERT INTO channels (channel_id, median_views, sample_n, refreshed) "
-                    "VALUES (?,?,?,?) ON CONFLICT(channel_id) DO UPDATE SET "
-                    "median_views=excluded.median_views, sample_n=excluded.sample_n, "
-                    "refreshed=excluded.refreshed",
-                    [(cid, m, n, ts) for cid, m, n, ts in fetched])
+                    "INSERT INTO channel_rates (channel_id, median_vel_short, "
+                    "n_short, median_vel_long, n_long, refreshed) VALUES (?,?,?,?,?,?) "
+                    "ON CONFLICT(channel_id) DO UPDATE SET "
+                    "median_vel_short=excluded.median_vel_short, n_short=excluded.n_short, "
+                    "median_vel_long=excluded.median_vel_long, n_long=excluded.n_long, "
+                    "refreshed=excluded.refreshed", fetched)
                 conn.commit()
             finally:
                 conn.close()
@@ -242,11 +332,28 @@ def channel_medians(channel_ids: list[str], api_key: str,
     return out
 
 
-def outlier_score(views: int, channel_median: float | None) -> float | None:
-    """views ÷ channel median. None when the median is unknown/unusable."""
-    if not channel_median or channel_median <= 0:
+def outlier_score(velocity: float, rates: dict | None, is_short: bool) -> float | None:
+    """This video's views/hr ÷ its channel's median views/hr for the same format.
+
+    Both sides are rates, so a 6-hour-old video is compared fairly against a
+    mature back catalogue. None when there's no comparable, large-enough
+    sample — a wrong number here is worse than no number.
+    """
+    if not rates or velocity <= 0:
         return None
-    return float(views) / float(channel_median)
+    bucket = rates.get("short" if is_short else "long")
+    if not bucket:
+        return None                     # no same-format history to compare against
+    median_vel, n = bucket
+    if not median_vel or median_vel <= 0 or n < MIN_SAMPLE_N:
+        return None
+    raw = float(velocity) / float(median_vel)
+    if n < TRUSTED_SAMPLE_N:
+        # Thin sample: shrink toward 1.0 so a 6-upload channel can't mint a
+        # 12x claim off noise.
+        weight = (n - MIN_SAMPLE_N) / float(TRUSTED_SAMPLE_N - MIN_SAMPLE_N)
+        raw = 1.0 + (raw - 1.0) * weight
+    return raw
 
 
 # ── the provider the trend engine consumes ────────────────────────────────────
@@ -261,14 +368,14 @@ class MetricsProvider:
     def __init__(self, api_key: str = "", enabled: bool = True):
         self.api_key = api_key
         self.enabled = enabled
-        self._medians: dict[str, float] = {}
+        self._rates: dict[str, dict] = {}
 
     def observe(self, videos: list) -> None:
-        """Record this run's snapshots and batch-resolve channel medians."""
+        """Record this run's snapshots and batch-resolve channel rates."""
         if not self.enabled or not videos:
             return
         record_snapshots(videos)
-        self._medians = channel_medians(
+        self._rates = channel_rates(
             [getattr(v, "channel_id", "") for v in videos], self.api_key)
 
     def velocity(self, video) -> float | None:
@@ -280,5 +387,10 @@ class MetricsProvider:
     def outlier(self, video) -> float | None:
         if not self.enabled:
             return None
-        return outlier_score(int(getattr(video, "views", 0) or 0),
-                             self._medians.get(getattr(video, "channel_id", "")))
+        # Compare like with like: this video's rate against its channel's
+        # median rate for the same format.
+        dur = int(getattr(video, "duration_s", 0) or 0)
+        is_short = 0 < dur <= SHORT_MAX_S
+        return outlier_score(getattr(video, "lifetime_velocity", 0.0),
+                             self._rates.get(getattr(video, "channel_id", "")),
+                             is_short)
