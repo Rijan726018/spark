@@ -33,3 +33,45 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# ── Stale Nexus terminal copies (untracked 2026-07-30) ────────────────────────
+# The spark repo was originally seeded from the Nexus terminal codebase
+# (C:/Users/rijan/Claude, github.com/Rijan726018/Claude — the live originals).
+# These local copies are dead weight; safe to delete from disk whenever.
+algos/
+assets/
+backend/
+electron/
+engines/
+frontend/
+ninjatrader_exports/
+researcher/
+server/
+utils/
+scripts/
+ARCHITECTURE.md
+Start_Desktop.bat
+Start_Nexus_Terminal.bat
+algo_configs.py
+algo_generator.py
+app.py
+app.tcss
+append_configs.py
+append_orderflow_configs.py
+backtest_service.py
+check_configs.py
+check_of.py
+docker-compose.yml
+fix_statuses.py
+generate_configs.py
+launch.bat
+launch_nexus.py
+strategy_engines.py
+update_configs.py
+wire_old_results.py
+write_algo_configs.py
+requirements.txt
+Makefile
+tests/test_api.py
+tests/test_allocator.py
+tests/test_strategies.py

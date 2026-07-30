@@ -1,4 +1,4 @@
--r requirements.txt
+-r requirements-spark.txt
 
 # Testing
 pytest>=8.0.0
